@@ -7,8 +7,10 @@ from ai2_kit.core.checkpoint import set_checkpoint_dir, apply_checkpoint
 from ai2_kit.core.pydantic import BaseModel
 from ai2_kit.domain import (
     deepmd,
+    mace,
     iface,
     lammps,
+    macelmp,
     lasp,
     selector,
     cp2k,
@@ -17,11 +19,14 @@ from ai2_kit.domain import (
     updater,
     anyware,
 
+    deepmd as _deepmd,
     lammps as _lammps,
     lasp as _lasp,
     cp2k as _cp2k,
     vasp as _vasp,
     anyware as _anyware,
+    mace as _mace,
+    macelmp as _macelmp,
 )
 
 
@@ -43,9 +48,11 @@ class CllWorkflowExecutorConfig(BaseExecutorConfig):
     class Context(BaseModel):
         class Train(BaseModel):
             deepmd: deepmd.CllDeepmdContextConfig
+            mace: mace.CllMaceContextConfig
 
         class Explore(BaseModel):
             lammps: Optional[_lammps.CllLammpsContextConfig] = None
+            macelmp: Optional[_macelmp.CllMaceLammpsContextConfig] = None
             lasp: Optional[_lasp.CllLaspContextConfig] = None
             anyware: Optional[_anyware.AnywareContextConfig] = None
 
@@ -75,10 +82,12 @@ class WorkflowConfig(BaseModel):
         vasp: Optional[_vasp.CllVaspInputConfig] = None
 
     class Train(BaseModel):
-        deepmd: deepmd.CllDeepmdInputConfig
+        deepmd: Optional[_deepmd.CllDeepmdInputConfig] = None
+        mace: Optional[_mace.CllMaceInputConfig] = None
 
     class Explore(BaseModel):
         lammps: Optional[_lammps.CllLammpsInputConfig] = None
+        macelmp: Optional[_macelmp.CllMaceLammpsInputConfig] = None
         lasp: Optional[_lasp.CllLaspInputConfig] = None
         anyware: Optional[_anyware.AnywareConfig] = None
 
@@ -215,7 +224,7 @@ async def cll_mlp_training_workflow(config: CllWorkflowConfig,
 
         # train
         if workflow_config.train.deepmd:
-            deepmd_input = deepmd.CllDeepmdInput(
+            deepmd_input = _deepmd.CllDeepmdInput(
                 config=workflow_config.train.deepmd,
                 mode=workflow_config.general.mode,
                 type_map=type_map,
@@ -224,13 +233,29 @@ async def cll_mlp_training_workflow(config: CllWorkflowConfig,
                 sel_type=shared_vars.dp_sel_type,
                 previous=[] if train_output is None else train_output.get_mlp_models(),
             )
-            deepmd_context = deepmd.CllDeepmdContext(
+            deepmd_context = _deepmd.CllDeepmdContext(
                 path_prefix=os.path.join(iter_path_prefix, 'train-deepmd'),
                 config=context_config.train.deepmd,
                 resource_manager=resource_manager,
             )
-            train_output = await apply_checkpoint(f'{cp_prefix}/train-deepmd')(deepmd.cll_deepmd)(deepmd_input, deepmd_context)
-
+            train_output = await apply_checkpoint(f'{cp_prefix}/train-deepmd')(_deepmd.cll_deepmd)(deepmd_input, deepmd_context)
+        
+        elif workflow_config.train.mace:
+            mace_input = _mace.CllMaceInput(
+                config=workflow_config.train.mace,
+                mode = workflow_config.general.mode,
+                type_map=type_map,
+                old_dataset=[] if train_output is None else train_output.get_training_dataset(),
+                new_dataset= label_output.get_labeled_system_dataset(),
+                sel_type=shared_vars.dp_sel_type,
+                previous=[] if train_output is None else train_output.get_mlp_models(),
+            )
+            mace_context = _mace.CllMaceContext(
+                path_prefix=os.path.join(iter_path_prefix, 'train_mace'),
+                config=context_config.train.mace,
+                resource_manager=resource_manager,
+            )
+            train_output = await apply_checkpoint(f'{cp_prefix}/train-mace')(_mace.cll_mace)(mace_input, mace_context)
         else:
             raise ValueError('No train method is specified')
 
@@ -257,6 +282,23 @@ async def cll_mlp_training_workflow(config: CllWorkflowConfig,
                 resource_manager=resource_manager,
             )
             explore_output = await apply_checkpoint(f'{cp_prefix}/explore-lammps')(lammps.cll_lammps)(lammps_input, lammps_context)
+        
+        elif workflow_config.explore.macelmp and context_config.explore.macelmp:
+            macelmp_input = macelmp.CllMaceLammpsInput(
+                config=workflow_config.explore.macelmp,
+                mode=workflow_config.general.mode,
+                type_map=type_map,
+                mass_map=mass_map,
+                mace_models=train_output.get_mlp_models(),
+                preset_template='mace',
+                new_system_files=new_explore_system_files,
+            )
+            macelmp_context = macelmp.CllMaceLammpsContext(
+                path_prefix=os.path.join(iter_path_prefix, 'explore_lammps'),
+                config=context_config.explore.macelmp,
+                resource_manager=resource_manager,
+            )
+            explore_output = await apply_checkpoint(f'{cp_prefix}/explore-lammps')(macelmp.cll_mace_lammps)(macelmp_input, macelmp_context)
 
         elif workflow_config.explore.lasp and context_config.explore.lasp:
             lasp_input = lasp.CllLaspInput(

@@ -41,7 +41,7 @@ class CllMaceInputConfig(BaseModel):
     """
     input_template: dict = dict()
     """
-    Deepmd input template.
+    MACE input template.
     """
     compress_model: bool = False
     """

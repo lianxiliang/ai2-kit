@@ -14,7 +14,7 @@ from .lammps import (
     CllLammpsContext,
     cll_lammps,
 )
-from ..tool.mace_devi import calculate_mace_model_deviation
+from ai2_kit.tool.mace_devi import calculate_mace_model_deviation
 
 logger = get_logger(__name__)
 
@@ -31,6 +31,7 @@ class CllMaceLammpsInput:
     mace_models: List[Artifact]  # MACE committee models
     type_map: List[str]
     mass_map: List[float]
+    preset_template: str
     mode: TRAINING_MODE = 'default'
     new_system_files: Optional[List[Artifact]] = None
     device: str = 'cuda'  # Device for MACE model deviation calculation
@@ -114,13 +115,13 @@ async def cll_mace_lammps(input: CllMaceLammpsInput, ctx: CllMaceLammpsContext):
     mace_template_vars = _get_mace_models_variables(input.mace_models)
     
     # Prepare LAMMPS configuration with MACE template variables
-    lammps_config = CllLammpsInputConfig(
-        **input.config.dict(),
-        template_vars={
-            **input.config.template_vars,
-            **mace_template_vars,
-        }
-    )
+    config_dict = input.config.dict()
+    config_dict['template_vars'] = {
+        **input.config.template_vars,
+        **mace_template_vars,
+    }
+    
+    lammps_config = CllLammpsInputConfig(**config_dict)
     
     # Create LAMMPS input using MACE preset template
     lammps_input = CllLammpsInput(
@@ -128,7 +129,7 @@ async def cll_mace_lammps(input: CllMaceLammpsInput, ctx: CllMaceLammpsContext):
         type_map=input.type_map,
         mass_map=input.mass_map,
         mode=input.mode,
-        preset_template='mace',  # Use mace template from constant.py
+        preset_template=input.preset_template,
         new_system_files=input.new_system_files or [],
         dp_models={},  # Empty - we use MACE through preset template
         dp_modifier=None,
