@@ -3,7 +3,6 @@ from ai2_kit.core.artifact import ArtifactDict, Artifact
 from typing import List, Tuple, Optional
 from ase import Atoms
 
-import ase.io
 import os
 
 
@@ -13,9 +12,11 @@ class DataFormat:
     VASP_OUTPUT_DIR = 'vasp/output_dir'
     LAMMPS_OUTPUT_DIR = 'lammps/output_dir'
     DEEPMD_OUTPUT_DIR = 'deepmd/output_dir'
+    MACE_OUTPUT_DIR = 'mace/output_dir'
     ANYWARE_OUTPUT_DIR = 'anyware/output_dir'
 
     DEEPMD_MODEL = 'deepmd/model'
+    MACE_MODEL = 'mace/model'
     DEEPMD_NPY = 'deepmd/npy'
     LASP_LAMMPS_OUT_DIR ='lasp+lammps/output_dir'
 
@@ -102,3 +103,77 @@ def convert_to_lammps_input_data(systems: List[ArtifactDict], base_dir: str, typ
             'attrs': artifact['attrs'],
         })
     return data_files
+
+
+def write_mace_cumulative_dataset(
+        train_file: str,
+        dataset_collection: List[ArtifactDict],
+        type_map: List[str],
+        extxyzkey: List[str] = ['energy', 'forces'],
+        max_structures: Optional[int] = None,
+        sample_method: str = 'sequential'
+):
+    """
+    Write multiple datasets from artifact collection to a MACE-compatible extxyz file.
+    
+    Reads DeePMD format data from provided artifacts and converts them to ASE Atoms objects
+    with energy and forces information, then writes them to a single extxyz file.
+    
+    :param train_file: Output path for the extxyz file
+    :param dataset_collection: List of artifact dictionaries pointing to deepmd/npy format datasets
+    :param type_map: List of chemical symbols mapping atom types 
+    :param extxyzkey: List containing keys for energy and forces in the output file,
+                      defaults to ['energy', 'forces']
+    :param max_structures: Maximum number of structures to write, None means all
+    :param sample_method: Method for sampling structures if max_structures is set:
+                         'sequential' (default), 'random', 'even'
+    """
+    from ai2_kit.tool.dpdata import read, deepmd2ase
+    from ai2_kit.core.log import get_logger
+    from ase import Atoms, io
+    import random
+    
+    logger = get_logger(__name__)
+    
+    # Ensure output directory exists
+    os.makedirs(os.path.dirname(os.path.abspath(train_file)), exist_ok=True)
+    
+    datapaths = [a['url'] for a in dataset_collection]
+    all_atoms = []
+    
+    # Process all dataset paths at once
+    try:
+        # Read all deepmd datasets
+        systems = read(*datapaths)
+        
+        # Convert each system to ASE atoms with energy and forces
+        for sys in systems:
+            atoms_list = deepmd2ase(sys, energy_key=extxyzkey[0], forces_key=extxyzkey[1])
+            all_atoms.extend(atoms_list)
+    except Exception as e:
+        logger.error(f"Error processing datasets: {e}")
+    
+    # Sample structures if requested
+    if max_structures is not None and max_structures < len(all_atoms):
+        if sample_method == 'random':
+            all_atoms = random.sample(all_atoms, max_structures)
+        elif sample_method == 'even':
+            # Take evenly spaced samples
+            indices = [int(i * len(all_atoms) / max_structures) for i in range(max_structures)]
+            all_atoms = [all_atoms[i] for i in indices]
+        else:  # 'sequential'
+            all_atoms = all_atoms[:max_structures]
+        
+        logger.info(f"Sampled {max_structures} structures using {sample_method} method")
+    
+    # Write all atoms to extxyz file
+    if all_atoms:
+        try:
+            io.write(train_file, all_atoms, format='extxyz')
+            logger.info(f"Wrote {len(all_atoms)} structures to {train_file}")
+        except Exception as e:
+            logger.error(f"Error writing to {train_file}: {e}")
+    else:
+        logger.warning("No structures were processed.")
+    
+    return train_file

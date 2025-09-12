@@ -16,6 +16,7 @@ from typing import Optional
 from dpdata.data_type import Axis, DataType
 import numpy as np
 import dpdata
+from ase import Atoms
 
 
 logger = get_logger(__name__)
@@ -273,3 +274,35 @@ def _read(data_path: str, **kwargs):
         set_fparam(system, fparam)
 
     return system
+
+
+def deepmd2ase(dp_sys: dpdata.LabeledSystem, energy_key: str = 'energy', forces_key: str = 'forces'):
+    """Convert deepmd/dpdata LabeledSystem to ASE Atoms list with energy and forces.
+
+    :param dp_sys: The dpdata system to convert
+    :param energy_key: Key to store energy in atoms.info dictionary, default is 'energy'
+    :param forces_key: Key to store forces in atoms.arrays dictionary, default is 'forces'
+    :return: List of ASE Atoms objects with energy and forces
+    """
+    data = dp_sys.data
+    atoms_list = []
+    
+    # Create mapping for atom types to chemical symbols
+    symbols = [data['atom_names'][i] for i in data['atom_types']]
+    
+    for i in range(dp_sys.get_nframes()):
+        # Create Atoms object with structure information
+        atoms = Atoms(
+            symbols=symbols,
+            positions=data['coords'][i],
+            cell=data['cells'][i],
+            pbc=True
+        )
+        
+        # Add energy and forces data
+        atoms.info[energy_key] = float(data['energies'][i])  # Convert to float for better compatibility
+        atoms.arrays[forces_key] = data['forces'][i].copy()  # Use copy to avoid reference issues
+        
+        atoms_list.append(atoms)
+    
+    return atoms_list

@@ -10,6 +10,10 @@ MODEL_DEVI_OUT = 'model_devi.out'
 MODEL_DEVI_NEU_OUT = 'model_devi_neu.out'
 MODEL_DEVI_RED_OUT = 'model_devi_red.out'
 
+MACE_INPUT_FILE = 'mace.yaml'
+MACE_FINAL_MODEL = 'mace_model.model'
+MACE_LMP_MODEL = 'mace_model.model-mliap_lammps.pt'
+
 SELECTOR_OUTPUT = 'selector_output'
 
 
