@@ -129,7 +129,6 @@ def _read_trajectory_frames(
         
     except Exception as e:
         logger.error(f"failed to read trajectory file {trajectory_file}: {e}")
-        logger.error(f"tried with format='{file_format}', type_map={type_map}")
         raise
 
 
@@ -185,7 +184,7 @@ def _calculate_mace_deviation_direct(
             models.append(model)
         
         # evaluate all models on all configurations
-        all_energies = []  # (n_models, n_frames)
+        all_virials = []  # (n_models, n_frames, 6) - virial tensors
         all_forces = []   # (n_models, n_frames, n_atoms, 3)
         
         for model_idx, model in enumerate(models):
@@ -208,7 +207,7 @@ def _calculate_mace_deviation_direct(
                 for config in configs
             ]
             
-            model_energies = []
+            model_virials = []
             model_forces = []
             
             # evaluate each configuration
@@ -219,13 +218,24 @@ def _calculate_mace_deviation_direct(
                     # direct model evaluation
                     output = model(batch.to_dict())
                     
-                    energy = torch_tools.to_numpy(output["energy"]).item()
+                    # extract virial/stress if available, otherwise use energy as proxy
+                    if "stress" in output:
+                        stress = torch_tools.to_numpy(output["stress"])
+                        # Convert stress to virial-like quantity for deviation analysis
+                        virial = stress.flatten()  # 6 components: xx, yy, zz, xy, xz, yz
+                    elif "virial" in output:
+                        virial = torch_tools.to_numpy(output["virial"]).flatten()
+                    else:
+                        # Fallback: use energy per atom as virial proxy
+                        energy = torch_tools.to_numpy(output["energy"]).item()
+                        virial = np.array([energy / len(frames[config_idx])] * 6)  # 6 components
+                    
                     forces = torch_tools.to_numpy(output["forces"])
                     
-                    model_energies.append(energy)
+                    model_virials.append(virial)
                     model_forces.append(forces)
             
-            all_energies.append(model_energies)
+            all_virials.append(model_virials)
             all_forces.append(model_forces)
             
             # clear model from GPU memory if using CUDA
@@ -233,14 +243,20 @@ def _calculate_mace_deviation_direct(
                 torch.cuda.empty_cache()
         
         # convert to numpy arrays for deviation calculation
-        all_energies = np.array(all_energies)  # (n_models, n_frames)
+        all_virials = np.array(all_virials)  # (n_models, n_frames, 6)
         
         frame_deviations = []
         
         for frame_idx in range(len(frames)):
-            # energy deviation for this frame
-            frame_energies = all_energies[:, frame_idx]
-            energy_std = np.std(frame_energies)
+            # virial deviation for this frame
+            frame_virials = all_virials[:, frame_idx, :]  # (n_models, 6)
+            virial_std = np.std(frame_virials, axis=0)  # (6,) - std for each virial component
+            
+            # Use maximum virial component deviation as the representative deviation
+            # This follows DeepMD convention for virial deviation analysis
+            max_virial_devi = float(np.max(virial_std))
+            min_virial_devi = float(np.min(virial_std))
+            avg_virial_devi = float(np.mean(virial_std))
             
             # force deviation for this frame
             frame_forces = np.array([all_forces[model_idx][frame_idx] for model_idx in range(len(models))])
@@ -249,7 +265,8 @@ def _calculate_mace_deviation_direct(
             # Debug: verify data structure
             if frame_idx == 0:  # Only log for first frame
                 logger.debug(f"Frame forces shape: {frame_forces.shape}")
-                logger.debug(f"Expected shape: ({len(models)}, n_atoms, 3)")
+                logger.debug(f"Frame virials shape: {frame_virials.shape}")
+                logger.debug(f"Expected shapes: forces ({len(models)}, n_atoms, 3), virials ({len(models)}, 6)")
             
             # DeepMD-style force deviation calculation
             n_atoms = frame_forces.shape[1]
@@ -260,11 +277,11 @@ def _calculate_mace_deviation_direct(
             squared_norms = np.sum(deviations**2, axis=2)  # (n_models, n_atoms) - L2 norm squared per atom per model
             force_deviations_per_atom = np.sqrt(np.mean(squared_norms, axis=0))  # (n_atoms,) - RMS across models
             
-            # frame deviation statistics
+            # frame deviation statistics (now using virial instead of energy)
             frame_deviation = {
-                'max_devi_e': float(energy_std),
-                'min_devi_e': float(energy_std), 
-                'avg_devi_e': float(energy_std),
+                'max_devi_v': max_virial_devi,
+                'min_devi_v': min_virial_devi, 
+                'avg_devi_v': avg_virial_devi,
                 'max_devi_f': float(np.max(force_deviations_per_atom)),
                 'min_devi_f': float(np.min(force_deviations_per_atom)),
                 'avg_devi_f': float(np.mean(force_deviations_per_atom)),
@@ -290,13 +307,13 @@ def _get_placeholder_frame_deviation(frame_idx: int) -> Dict[str, float]:
     """Generate placeholder deviation values for a single frame"""
     import numpy as np
     np.random.seed(frame_idx % 1000)
-    base_e = 0.001 + 0.0005 * np.random.random()
+    base_v = 0.001 + 0.0005 * np.random.random()  # virial deviation base
     base_f = 0.05 + 0.03 * np.random.random()
     
     return {
-        'max_devi_e': base_e * (1.2 + 0.3 * np.random.random()),
-        'min_devi_e': base_e * (0.8 + 0.2 * np.random.random()),
-        'avg_devi_e': base_e,
+        'max_devi_v': base_v * (1.2 + 0.3 * np.random.random()),
+        'min_devi_v': base_v * (0.8 + 0.2 * np.random.random()),
+        'avg_devi_v': base_v,
         'max_devi_f': base_f * (1.5 + 0.5 * np.random.random()),
         'min_devi_f': base_f * (0.5 + 0.3 * np.random.random()),
         'avg_devi_f': base_f,
@@ -318,18 +335,18 @@ def _write_deviation_results(
     ensure_dir(output_file)
     
     with open(output_file, 'w') as f:
-        # write header matching DeepMD format
-        f.write('#   step max_devi_e min_devi_e avg_devi_e max_devi_f min_devi_f avg_devi_f\n')
+        # write header matching DeepMD format exactly
+        f.write('#       step         max_devi_v         min_devi_v         avg_devi_v         max_devi_f         min_devi_f         avg_devi_f\n')
         
         for frame_idx, frame_deviation in enumerate(frame_deviations):
             # use frame index as timestep since trajectory is pre-sampled
             timestep = frame_idx
             
-            # write results in DeepMD format
-            f.write(f"{timestep:>12d} {frame_deviation['max_devi_e']:>12.6f} "
-                   f"{frame_deviation['min_devi_e']:>12.6f} {frame_deviation['avg_devi_e']:>12.6f} "
-                   f"{frame_deviation['max_devi_f']:>12.6f} {frame_deviation['min_devi_f']:>12.6f} "
-                   f"{frame_deviation['avg_devi_f']:>12.6f}\n")
+            # write results in DeepMD format with virial deviations
+            f.write(f"{timestep:>12d} {frame_deviation['max_devi_v']:>14.6e} "
+                   f"{frame_deviation['min_devi_v']:>14.6e} {frame_deviation['avg_devi_v']:>14.6e} "
+                   f"{frame_deviation['max_devi_f']:>14.6e} {frame_deviation['min_devi_f']:>14.6e} "
+                   f"{frame_deviation['avg_devi_f']:>14.6e}\n")
     
     logger.info(f"deviation statistics written to: {output_file}")
 
@@ -357,7 +374,7 @@ def _calculate_placeholder_deviation(
     
     with open(output_file, 'w') as f:
         # write header matching DeepMD format exactly
-        f.write('#   step max_devi_e min_devi_e avg_devi_e max_devi_f min_devi_f avg_devi_f\n')
+        f.write('#       step         max_devi_v         min_devi_v         avg_devi_v         max_devi_f         min_devi_f         avg_devi_f\n')
         
         for i, atoms in enumerate(atoms_list):
             # use frame index as timestep
@@ -369,7 +386,7 @@ def _calculate_placeholder_deviation(
             
             # base deviation scales with system size and model count
             base_force_devi = 0.02 * np.sqrt(n_atoms / 10.0) * np.sqrt(n_models / 4.0)
-            base_energy_devi = 0.001 * n_atoms * np.sqrt(n_models / 4.0)
+            base_virial_devi = 0.001 * n_atoms * np.sqrt(n_models / 4.0)  # virial instead of energy
             
             # add some variation across frames
             frame_factor = 1.0 + 0.3 * np.sin(i * 0.1) + 0.1 * np.random.random()
@@ -378,12 +395,12 @@ def _calculate_placeholder_deviation(
             min_devi_f = base_force_devi * frame_factor * 0.3
             avg_devi_f = base_force_devi * frame_factor
             
-            max_devi_e = base_energy_devi * frame_factor
-            min_devi_e = base_energy_devi * frame_factor * 0.5  
-            avg_devi_e = base_energy_devi * frame_factor * 0.8
+            max_devi_v = base_virial_devi * frame_factor
+            min_devi_v = base_virial_devi * frame_factor * 0.5  
+            avg_devi_v = base_virial_devi * frame_factor * 0.8
             
-            f.write(f'{timestep:8d} {max_devi_e:12.6f} {min_devi_e:12.6f} {avg_devi_e:12.6f} '
-                   f'{max_devi_f:12.6f} {min_devi_f:12.6f} {avg_devi_f:12.6f}\n')
+            f.write(f'{timestep:8d} {max_devi_v:14.6e} {min_devi_v:14.6e} {avg_devi_v:14.6e} '
+                   f'{max_devi_f:14.6e} {min_devi_f:14.6e} {avg_devi_f:14.6e}\n')
     
     logger.info(f'placeholder model deviation results written to: {output_file}')
     return output_file
