@@ -290,7 +290,6 @@ async def cll_mlp_training_workflow(config: CllWorkflowConfig,
                 type_map=type_map,
                 mass_map=mass_map,
                 mace_models=train_output.get_mlp_models(),
-                preset_template='mace',
                 new_system_files=new_explore_system_files,
             )
             macelmp_context = macelmp.CllMaceLammpsContext(

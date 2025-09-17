@@ -31,11 +31,9 @@ class CllMaceLammpsInput:
     mace_models: List[Artifact]  # MACE committee models
     type_map: List[str]
     mass_map: List[float]
-    preset_template: str
     mode: TRAINING_MODE = 'default'
     new_system_files: Optional[List[Artifact]] = None
     device: str = 'cuda'  # Device for MACE model deviation calculation
-    
     @classmethod
     def from_mace_template(cls, config: CllMaceLammpsInputConfig, 
                           mace_models: List[Artifact], 
@@ -123,15 +121,15 @@ async def cll_mace_lammps(input: CllMaceLammpsInput, ctx: CllMaceLammpsContext):
     
     lammps_config = CllLammpsInputConfig(**config_dict)
     
-    # Create LAMMPS input using MACE preset template
+    # Create LAMMPS input - no preset template needed, uses custom_ff
     lammps_input = CllLammpsInput(
         config=lammps_config,
         type_map=input.type_map,
         mass_map=input.mass_map,
         mode=input.mode,
-        preset_template=input.preset_template,
+        preset_template='custom-ff',  # Use custom-ff preset which allows custom_ff
         new_system_files=input.new_system_files or [],
-        dp_models={},  # Empty - we use MACE through preset template
+        dp_models={},  # Empty - we use MACE through custom_ff
         dp_modifier=None,
         dp_sel_type=None,
     )
