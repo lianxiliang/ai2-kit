@@ -17,7 +17,6 @@ def calculate_mace_model_deviation(
     model_files: List[str],
     traj_file: str,
     output_file: str,
-    sample_freq: Optional[int] = None,
     type_map: Optional[List[str]] = None,
     chunk_size: int = 1000,
     device: str = 'cuda',
@@ -36,7 +35,6 @@ def calculate_mace_model_deviation(
     :param model_files: list of MACE model file paths (.model files)
     :param traj_file: path to reference trajectory file (LAMMPS dump, xyz, etc.)
     :param output_file: path to output deviation file (model_devi.out format)
-    :param sample_freq: sampling frequency for timestep calculation (optional)
     :param type_map: type mapping for atoms (optional, for compatibility)
     :param chunk_size: process frames in chunks to manage memory (default: 1000)
     :param device: device for MACE calculation ('cuda', 'cpu', 'mps')
@@ -63,10 +61,10 @@ def calculate_mace_model_deviation(
     except ImportError:
         use_real_mace = False
         logger.warning("MACE package not found - using placeholder calculation")
-        return _calculate_placeholder_deviation(model_files, [], output_file, sample_freq)
+        return _calculate_placeholder_deviation(model_files, [], output_file)
     
     # read trajectory frames with reference data
-    frames = _read_trajectory_frames(traj_file, sample_freq, type_map)
+    frames = _read_trajectory_frames(traj_file, type_map)
     logger.info(f"loaded {len(frames)} frames from trajectory")
     
     # calculate model deviation using direct MACE evaluation
@@ -75,10 +73,10 @@ def calculate_mace_model_deviation(
             frames, model_files, device, default_dtype
         )
         # write results
-        _write_deviation_results(frame_deviations, output_file, sample_freq)
+        _write_deviation_results(frame_deviations, output_file)
     else:
         # fallback to placeholder
-        _calculate_placeholder_deviation(model_files, frames, output_file, sample_freq)
+        _calculate_placeholder_deviation(model_files, frames, output_file)
     
     logger.info(f"model deviation calculation complete: {output_file}")
     return output_file
@@ -86,18 +84,14 @@ def calculate_mace_model_deviation(
 
 def _read_trajectory_frames(
     trajectory_file: str, 
-    sample_freq: Optional[int] = None,
-    type_map: Optional[List[str]] = None,
-    slice_str: Optional[str] = None
+    type_map: Optional[List[str]] = None
 ) -> List[Any]:
     """
     Read trajectory frames using ASE with proper format and type ordering
-    Efficiently handles large files by doing slicing during read, not after
+    Reads all frames since trajectory was already written with desired sampling
     
     :param trajectory_file: path to trajectory file (LAMMPS dump, xyz, etc.)
-    :param sample_freq: sampling frequency for frames (e.g., 10 = every 10th frame)
     :param type_map: type mapping for atom ordering (specorder for LAMMPS dumps)
-    :param slice_str: slice string for frame selection (e.g., "::10" for every 10th frame)
     :return: list of ASE Atoms objects
     """
     import ase.io
@@ -113,18 +107,11 @@ def _read_trajectory_frames(
         # auto-detect format
         file_format = None
     
-    # determine index for reading - this is key for efficiency!
-    if slice_str:
-        index = slice_str
-        logger.info(f"using custom slice: '{slice_str}'")
-    elif sample_freq and sample_freq > 1:
-        index = f'::{sample_freq}'
-        logger.info(f"sampling every {sample_freq} frames")
-    else:
-        index = ':'
-        logger.info("reading all frames")
+    # read all frames - no sampling needed since trajectory is pre-sampled
+    index = ':'
+    logger.info("reading all frames from pre-sampled trajectory")
     
-    # read frames using ASE with efficient slicing during read
+    # read frames using ASE with efficient reading
     try:
         if file_format == 'lammps-dump-text' and type_map:
             logger.info(f"reading LAMMPS trajectory with specorder: {type_map}")
@@ -137,12 +124,12 @@ def _read_trajectory_frames(
         if not isinstance(frames, list):
             frames = [frames]
         
-        logger.info(f"efficiently read {len(frames)} frames from {trajectory_file}")
+        logger.info(f"read {len(frames)} frames from {trajectory_file}")
         return frames
         
     except Exception as e:
         logger.error(f"failed to read trajectory file {trajectory_file}: {e}")
-        logger.error(f"tried with format='{file_format}', index='{index}', type_map={type_map}")
+        logger.error(f"tried with format='{file_format}', type_map={type_map}")
         raise
 
 
@@ -318,15 +305,13 @@ def _get_placeholder_frame_deviation(frame_idx: int) -> Dict[str, float]:
 
 def _write_deviation_results(
     frame_deviations: List[Dict[str, float]],
-    output_file: str,
-    sample_freq: Optional[int] = None
+    output_file: str
 ) -> None:
     """
     Write model deviation results to file in DeepMD format
     
     :param frame_deviations: list of deviation statistics for each frame
     :param output_file: path to output file
-    :param sample_freq: sampling frequency for timestep calculation
     """
     logger.info("writing model deviation statistics")
     
@@ -337,8 +322,8 @@ def _write_deviation_results(
         f.write('#   step max_devi_e min_devi_e avg_devi_e max_devi_f min_devi_f avg_devi_f\n')
         
         for frame_idx, frame_deviation in enumerate(frame_deviations):
-            # calculate timestep
-            timestep = frame_idx * (sample_freq if sample_freq else 1)
+            # use frame index as timestep since trajectory is pre-sampled
+            timestep = frame_idx
             
             # write results in DeepMD format
             f.write(f"{timestep:>12d} {frame_deviation['max_devi_e']:>12.6f} "
@@ -352,8 +337,7 @@ def _write_deviation_results(
 def _calculate_placeholder_deviation(
     model_files: List[str],
     atoms_list: List[Any],
-    output_file: str,
-    sample_freq: Optional[int] = None
+    output_file: str
 ) -> str:
     """
     placeholder MACE model deviation calculation for testing
@@ -365,7 +349,6 @@ def _calculate_placeholder_deviation(
     :param model_files: list of model files (for scaling calculations)
     :param atoms_list: list of atoms objects
     :param output_file: output file path
-    :param sample_freq: sampling frequency
     :return: path to output file
     """
     logger.warning("using placeholder model deviation calculation")
@@ -377,8 +360,8 @@ def _calculate_placeholder_deviation(
         f.write('#   step max_devi_e min_devi_e avg_devi_e max_devi_f min_devi_f avg_devi_f\n')
         
         for i, atoms in enumerate(atoms_list):
-            # calculate timestep like real calculation
-            timestep = i * (sample_freq if sample_freq else 1)
+            # use frame index as timestep
+            timestep = i
             
             # generate realistic dummy values
             n_models = len(model_files)

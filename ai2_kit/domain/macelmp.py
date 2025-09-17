@@ -167,7 +167,6 @@ async def cll_mace_lammps(input: CllMaceLammpsInput, ctx: CllMaceLammpsContext):
                     model_files=mace_models_paths,
                     traj_file=traj_path,
                     output_file=model_devi_path,
-                    sample_freq=input.config.sample_freq,
                     type_map=input.type_map,
                     device=input.device,  # Pass device for MACE calculator
                 )
