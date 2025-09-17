@@ -66,7 +66,7 @@ def calculate_mace_model_deviation(
         return _calculate_placeholder_deviation(model_files, [], output_file, sample_freq)
     
     # read trajectory frames with reference data
-    frames = _read_trajectory_frames(traj_file, sample_freq)
+    frames = _read_trajectory_frames(traj_file, sample_freq, type_map)
     logger.info(f"loaded {len(frames)} frames from trajectory")
     
     # calculate model deviation using direct MACE evaluation
@@ -84,30 +84,65 @@ def calculate_mace_model_deviation(
     return output_file
 
 
-def _read_trajectory_frames(trajectory_file: str, sample_freq: Optional[int] = None) -> List[Any]:
+def _read_trajectory_frames(
+    trajectory_file: str, 
+    sample_freq: Optional[int] = None,
+    type_map: Optional[List[str]] = None,
+    slice_str: Optional[str] = None
+) -> List[Any]:
     """
-    Read trajectory frames using ASE
+    Read trajectory frames using ASE with proper format and type ordering
+    Efficiently handles large files by doing slicing during read, not after
     
     :param trajectory_file: path to trajectory file (LAMMPS dump, xyz, etc.)
-    :param sample_freq: sampling frequency for frames
+    :param sample_freq: sampling frequency for frames (e.g., 10 = every 10th frame)
+    :param type_map: type mapping for atom ordering (specorder for LAMMPS dumps)
+    :param slice_str: slice string for frame selection (e.g., "::10" for every 10th frame)
     :return: list of ASE Atoms objects
     """
     import ase.io
+    from pathlib import Path
     
-    # read all frames using ASE
+    # determine format based on file extension
+    file_path = Path(trajectory_file)
+    if file_path.suffix in ['.lammpstrj', '.dump']:
+        file_format = 'lammps-dump-text'
+    elif file_path.suffix in ['.xyz']:
+        file_format = 'xyz'
+    else:
+        # auto-detect format
+        file_format = None
+    
+    # determine index for reading - this is key for efficiency!
+    if slice_str:
+        index = slice_str
+        logger.info(f"using custom slice: '{slice_str}'")
+    elif sample_freq and sample_freq > 1:
+        index = f'::{sample_freq}'
+        logger.info(f"sampling every {sample_freq} frames")
+    else:
+        index = ':'
+        logger.info("reading all frames")
+    
+    # read frames using ASE with efficient slicing during read
     try:
-        frames = ase.io.read(trajectory_file, index=':')
+        if file_format == 'lammps-dump-text' and type_map:
+            logger.info(f"reading LAMMPS trajectory with specorder: {type_map}")
+            frames = ase.io.read(trajectory_file, index=index, format=file_format, specorder=type_map)
+        elif file_format:
+            frames = ase.io.read(trajectory_file, index=index, format=file_format)
+        else:
+            frames = ase.io.read(trajectory_file, index=index)
+        
         if not isinstance(frames, list):
             frames = [frames]
         
-        if sample_freq and sample_freq > 1:
-            frames = frames[::sample_freq]
-        
-        logger.info(f"read {len(frames)} frames from {trajectory_file}")
+        logger.info(f"efficiently read {len(frames)} frames from {trajectory_file}")
         return frames
         
     except Exception as e:
         logger.error(f"failed to read trajectory file {trajectory_file}: {e}")
+        logger.error(f"tried with format='{file_format}', index='{index}', type_map={type_map}")
         raise
 
 
