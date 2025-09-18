@@ -221,7 +221,7 @@ def _yaml_get_path_node(node, constructor):
 
 def dict_remove_dot_keys(d):
     for k in list(d.keys()):
-        if k.startswith('.'):
+        if isinstance(k, str) and k.startswith('.'):
             del d[k]
         elif isinstance(d[k], dict):
             dict_remove_dot_keys(d[k])
