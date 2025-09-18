@@ -343,7 +343,7 @@ def _build_mace_steps(mace_cmd: str,
     )
 
     if compress_model:
-        steps.append(BashStep(cmd=[f'mace_create_lammps_model', f'{model_name}.model', '--format=mliap'],
+        steps.append(BashStep(cmd=[f'{mace_cmd} mace_create_lammps_model', f'{model_name}.model', '--format=mliap'],
                               cwd=cwd))
     return steps
 
