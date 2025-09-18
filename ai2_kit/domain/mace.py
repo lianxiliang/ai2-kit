@@ -2,13 +2,11 @@ from ai2_kit.core.artifact import Artifact, ArtifactDict
 from ai2_kit.core.script import BashScript, BashStep, BashSteps, BashTemplate, make_gpu_parallel_steps
 from ai2_kit.core.job import gather_jobs
 from ai2_kit.core.log import get_logger
-from ai2_kit.core.util import dict_nested_get, expand_globs, dump_json, list_split, flatten, create_fn, get_yaml
+from ai2_kit.core.util import dict_nested_get, expand_globs, dump_json, list_split, flatten, create_fn
 from ai2_kit.core.pydantic import BaseModel
-# from ai2_kit.tool.dpdata import set_fparam, register_data_types
 
 from typing import List, Tuple, Optional
 from dataclasses import dataclass
-from itertools import groupby
 import os
 import sys
 import copy
@@ -373,12 +371,41 @@ def make_mace_task_dirs(input_template: dict,
 
         mace_input = input_modifier(mace_input)
         
-        # Convert config dict to YAML string format
-        # Using StringIO because ruamel.yaml.dump() requires a file-like object
-        yaml = get_yaml()
+        # Convert config dict to YAML string format with proper quoting
+        # Use ruamel.yaml with roundtrip mode to preserve formatting
+        from ruamel.yaml import YAML
+        from ruamel.yaml.scalarstring import DoubleQuotedScalarString
         from io import StringIO
+        
+        # Smart string quoting function with MACE-specific rules
+        def _smart_quote_strings(obj, path=''):
+            """
+            Intelligently quote strings based on MACE requirements:
+            - Always quote strings that could be interpreted as other types
+            - Handle nested structures recursively
+            - Preserve non-string types (integers, floats, booleans, lists)
+            """
+            if isinstance(obj, dict):
+                return {k: _smart_quote_strings(v, f'{path}.{k}' if path else str(k)) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [_smart_quote_strings(item, f'{path}[{i}]') for i, item in enumerate(obj)]
+            elif isinstance(obj, str):
+                # Quote all strings for MACE compatibility
+                # This ensures consistent YAML format and prevents parsing issues
+                return DoubleQuotedScalarString(obj)
+            else:
+                # Preserve integers, floats, booleans, None, etc. as-is
+                return obj
+        
+        # Apply smart string quoting to the entire configuration
+        mace_input_quoted = _smart_quote_strings(mace_input)
+        
+        yaml = YAML()
+        yaml.preserve_quotes = True
+        yaml.default_flow_style = False
+        yaml.width = 4096  # Prevent line wrapping of train_file path
         output = StringIO()
-        yaml.dump(mace_input, output)
+        yaml.dump(mace_input_quoted, output)
         mace_input_yaml = output.getvalue()
         
         mace_input_path = os.path.join(task_dir, MACE_INPUT_FILE)
@@ -405,8 +432,7 @@ def make_mace_input(input_template: dict,
 
     mace_input['seed'] = _random_seed()
     mace_input['train_file'] = train_file
-
-    mace_input['name'] = f"mace_model"
+    mace_input['name'] = "mace_model"
     
     return mace_input
 
