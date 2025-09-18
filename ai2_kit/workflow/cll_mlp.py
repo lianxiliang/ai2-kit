@@ -47,8 +47,8 @@ logger = get_logger(__name__)
 class CllWorkflowExecutorConfig(BaseExecutorConfig):
     class Context(BaseModel):
         class Train(BaseModel):
-            deepmd: deepmd.CllDeepmdContextConfig
-            mace: mace.CllMaceContextConfig
+            deepmd: Optional[_deepmd.CllDeepmdContextConfig] = None
+            mace: Optional[_mace.CllMaceContextConfig] = None
 
         class Explore(BaseModel):
             lammps: Optional[_lammps.CllLammpsContextConfig] = None
@@ -223,7 +223,7 @@ async def cll_mlp_training_workflow(config: CllWorkflowConfig,
             break
 
         # train
-        if workflow_config.train.deepmd:
+        if workflow_config.train.deepmd and context_config.train.deepmd:
             deepmd_input = _deepmd.CllDeepmdInput(
                 config=workflow_config.train.deepmd,
                 mode=workflow_config.general.mode,
@@ -240,7 +240,7 @@ async def cll_mlp_training_workflow(config: CllWorkflowConfig,
             )
             train_output = await apply_checkpoint(f'{cp_prefix}/train-deepmd')(_deepmd.cll_deepmd)(deepmd_input, deepmd_context)
         
-        elif workflow_config.train.mace:
+        elif workflow_config.train.mace and context_config.train.mace:
             mace_input = _mace.CllMaceInput(
                 config=workflow_config.train.mace,
                 mode = workflow_config.general.mode,
@@ -257,7 +257,7 @@ async def cll_mlp_training_workflow(config: CllWorkflowConfig,
             )
             train_output = await apply_checkpoint(f'{cp_prefix}/train-mace')(_mace.cll_mace)(mace_input, mace_context)
         else:
-            raise ValueError('No train method is specified')
+            raise ValueError("Either deepmd or mace must be configured in both workflow and context configs")
 
         # explore
         new_explore_system_files = []
