@@ -327,6 +327,20 @@ def _build_mace_steps(mace_cmd: str,
                         model_name: str = 'mace_model',
                         ):
     steps = []
+    
+    # Split mace_cmd into environment prefix and actual command
+    # Expected format: "srun ... mace_run_train" -> ["srun ...", "mace_run_train"]
+    cmd_parts = mace_cmd.rsplit(' ', 1)  # Split from the right to get the last part
+    if len(cmd_parts) == 2:
+        env_prefix, base_cmd = cmd_parts
+        # Ensure base_cmd is actually a MACE command
+        if 'mace' not in base_cmd:
+            # Fallback: treat entire string as command
+            env_prefix, base_cmd = '', mace_cmd
+    else:
+        env_prefix, base_cmd = '', mace_cmd
+    
+    # Build training command
     mace_train_cmd = f'{mace_cmd} --config {MACE_INPUT_FILE} {mace_train_opts}'
 
     # MACE restart logic: check for checkpoint files and restart accordingly
@@ -343,8 +357,13 @@ def _build_mace_steps(mace_cmd: str,
     )
 
     if compress_model:
-        steps.append(BashStep(cmd=[f'{mace_cmd} mace_create_lammps_model', f'{model_name}.model', '--format=mliap'],
-                              cwd=cwd))
+        # Build compression command using the same environment prefix
+        if env_prefix:
+            compress_cmd = f'{env_prefix} mace_create_lammps_model {model_name}.model --format=mliap'
+        else:
+            compress_cmd = f'mace_create_lammps_model {model_name}.model --format=mliap'
+        
+        steps.append(BashStep(cmd=compress_cmd, cwd=cwd))
     return steps
 
 

@@ -3,6 +3,7 @@ from ai2_kit.core.artifact import ArtifactDict, Artifact
 from typing import List, Tuple, Optional
 from ase import Atoms
 
+import ase.io
 import os
 
 
