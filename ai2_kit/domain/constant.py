@@ -149,6 +149,11 @@ pair_style deepmd $$DP_MODELS out_freq ${THERMO_FREQ} out_file model_devi.out $$
 pair_coeff * *
 '''
 
+_MACE_FORCE_FIELD = '''\
+pair_style      mliap unified $$MACE_LAMMPS_MODEL 0
+pair_coeff      * * $$SPECORDER
+'''
+
 _DP_FEP_REDOX_FORCE_FIELD = '''\
 variable LAMBDA_i equal 1-v_LAMBDA_f
 
@@ -209,6 +214,7 @@ fix dplr all dplr $$DP_MODELS_0 type_associate $$DPLR_TYPE_ASSOCIATION bond_type
 PRESET_LAMMPS_INPUT_TEMPLATE = {
     'default'  : '\n'.join([_DEFAULT_LAMMPS_TOP, _DP_FORCE_FIELD, _DEFAULT_LAMMPS_BOTTOM]),
     'custom-ff': '\n'.join([_DEFAULT_LAMMPS_TOP, '$$CUSTOM_FF', _DEFAULT_LAMMPS_BOTTOM]),
+    'mace'     : '\n'.join([_DEFAULT_LAMMPS_TOP, _MACE_FORCE_FIELD, _DEFAULT_LAMMPS_BOTTOM]),
     'fep-pka'  : '\n'.join([_DEFAULT_LAMMPS_TOP, _DP_FEP_PKA_FORCE_FIELD, _DEFAULT_LAMMPS_BOTTOM]),
     'fep-redox': '\n'.join([_DEFAULT_LAMMPS_TOP, _DP_FEP_REDOX_FORCE_FIELD, _DEFAULT_LAMMPS_BOTTOM ]),
     'dpff'     : '\n'.join([_DEFAULT_LAMMPS_TOP, _DP_FORCE_FIELD, _DPFF_CONFIG, _DEFAULT_LAMMPS_BOTTOM]),

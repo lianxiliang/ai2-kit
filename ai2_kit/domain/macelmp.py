@@ -105,7 +105,7 @@ def _get_mace_models_variables(models: List[Artifact]):
 
 async def cll_mace_lammps(input: CllMaceLammpsInput, ctx: CllMaceLammpsContext):
     """
-    MACE-enabled LAMMPS exploration using custom_ff approach
+    MACE-enabled LAMMPS exploration using mace preset template
     """
     logger.info(f'Starting MACE-LAMMPS exploration with {len(input.mace_models)} models on device: {input.device}')
     
@@ -119,17 +119,22 @@ async def cll_mace_lammps(input: CllMaceLammpsInput, ctx: CllMaceLammpsContext):
         **mace_template_vars,
     }
     
+    # Handle fep_opts properly - if it exists as dict, convert back to FepOptions object
+    if 'fep_opts' in config_dict and isinstance(config_dict['fep_opts'], dict):
+        from .lammps import FepOptions
+        config_dict['fep_opts'] = FepOptions(**config_dict['fep_opts'])
+    
     lammps_config = CllLammpsInputConfig(**config_dict)
     
-    # Create LAMMPS input - no preset template needed, uses custom_ff
+    # Create LAMMPS input using the configured preset template
     lammps_input = CllLammpsInput(
         config=lammps_config,
         type_map=input.type_map,
         mass_map=input.mass_map,
         mode=input.mode,
-        preset_template='custom-ff',  # Use custom-ff preset which allows custom_ff
+        preset_template=input.config.preset_template or 'mace',  # Default to 'mace' if not specified
         new_system_files=input.new_system_files or [],
-        dp_models={},  # Empty - we use MACE through custom_ff
+        dp_models={},  # Empty - we use MACE through preset template
         dp_modifier=None,
         dp_sel_type=None,
     )
