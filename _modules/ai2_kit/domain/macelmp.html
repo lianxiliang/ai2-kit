@@ -543,7 +543,7 @@ document.write(`
 
 <div class="viewcode-block" id="cll_mace_lammps"><a class="viewcode-back" href="../../../_api/ai2_kit.domain.macelmp.html#ai2_kit.domain.macelmp.cll_mace_lammps">[docs]</a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">cll_mace_lammps</span><span class="p">(</span><span class="nb">input</span><span class="p">:</span> <span class="n">CllMaceLammpsInput</span><span class="p">,</span> <span class="n">ctx</span><span class="p">:</span> <span class="n">CllMaceLammpsContext</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">    MACE-enabled LAMMPS exploration using custom_ff approach</span>
+<span class="sd">    MACE-enabled LAMMPS exploration using mace preset template</span>
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Starting MACE-LAMMPS exploration with </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="nb">input</span><span class="o">.</span><span class="n">mace_models</span><span class="p">)</span><span class="si">}</span><span class="s1"> models on device: </span><span class="si">{</span><span class="nb">input</span><span class="o">.</span><span class="n">device</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
     
@@ -557,17 +557,22 @@ document.write(`
         <span class="o">**</span><span class="n">mace_template_vars</span><span class="p">,</span>
     <span class="p">}</span>
     
+    <span class="c1"># Handle fep_opts properly - if it exists as dict, convert back to FepOptions object</span>
+    <span class="k">if</span> <span class="s1">&#39;fep_opts&#39;</span> <span class="ow">in</span> <span class="n">config_dict</span> <span class="ow">and</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">config_dict</span><span class="p">[</span><span class="s1">&#39;fep_opts&#39;</span><span class="p">],</span> <span class="nb">dict</span><span class="p">):</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">.lammps</span><span class="w"> </span><span class="kn">import</span> <span class="n">FepOptions</span>
+        <span class="n">config_dict</span><span class="p">[</span><span class="s1">&#39;fep_opts&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">FepOptions</span><span class="p">(</span><span class="o">**</span><span class="n">config_dict</span><span class="p">[</span><span class="s1">&#39;fep_opts&#39;</span><span class="p">])</span>
+    
     <span class="n">lammps_config</span> <span class="o">=</span> <span class="n">CllLammpsInputConfig</span><span class="p">(</span><span class="o">**</span><span class="n">config_dict</span><span class="p">)</span>
     
-    <span class="c1"># Create LAMMPS input - no preset template needed, uses custom_ff</span>
+    <span class="c1"># Create LAMMPS input using the configured preset template</span>
     <span class="n">lammps_input</span> <span class="o">=</span> <span class="n">CllLammpsInput</span><span class="p">(</span>
         <span class="n">config</span><span class="o">=</span><span class="n">lammps_config</span><span class="p">,</span>
         <span class="n">type_map</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">type_map</span><span class="p">,</span>
         <span class="n">mass_map</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">mass_map</span><span class="p">,</span>
         <span class="n">mode</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">mode</span><span class="p">,</span>
-        <span class="n">preset_template</span><span class="o">=</span><span class="s1">&#39;custom-ff&#39;</span><span class="p">,</span>  <span class="c1"># Use custom-ff preset which allows custom_ff</span>
+        <span class="n">preset_template</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">preset_template</span> <span class="ow">or</span> <span class="s1">&#39;mace&#39;</span><span class="p">,</span>  <span class="c1"># Default to &#39;mace&#39; if not specified</span>
         <span class="n">new_system_files</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">new_system_files</span> <span class="ow">or</span> <span class="p">[],</span>
-        <span class="n">dp_models</span><span class="o">=</span><span class="p">{},</span>  <span class="c1"># Empty - we use MACE through custom_ff</span>
+        <span class="n">dp_models</span><span class="o">=</span><span class="p">{},</span>  <span class="c1"># Empty - we use MACE through preset template</span>
         <span class="n">dp_modifier</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
         <span class="n">dp_sel_type</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="p">)</span>

@@ -765,6 +765,20 @@ document.write(`
                         <span class="n">model_name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;mace_model&#39;</span><span class="p">,</span>
                         <span class="p">):</span>
     <span class="n">steps</span> <span class="o">=</span> <span class="p">[]</span>
+    
+    <span class="c1"># Split mace_cmd into environment prefix and actual command</span>
+    <span class="c1"># Expected format: &quot;srun ... mace_run_train&quot; -&gt; [&quot;srun ...&quot;, &quot;mace_run_train&quot;]</span>
+    <span class="n">cmd_parts</span> <span class="o">=</span> <span class="n">mace_cmd</span><span class="o">.</span><span class="n">rsplit</span><span class="p">(</span><span class="s1">&#39; &#39;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>  <span class="c1"># Split from the right to get the last part</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">cmd_parts</span><span class="p">)</span> <span class="o">==</span> <span class="mi">2</span><span class="p">:</span>
+        <span class="n">env_prefix</span><span class="p">,</span> <span class="n">base_cmd</span> <span class="o">=</span> <span class="n">cmd_parts</span>
+        <span class="c1"># Ensure base_cmd is actually a MACE command</span>
+        <span class="k">if</span> <span class="s1">&#39;mace&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">base_cmd</span><span class="p">:</span>
+            <span class="c1"># Fallback: treat entire string as command</span>
+            <span class="n">env_prefix</span><span class="p">,</span> <span class="n">base_cmd</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">mace_cmd</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">env_prefix</span><span class="p">,</span> <span class="n">base_cmd</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">mace_cmd</span>
+    
+    <span class="c1"># Build training command</span>
     <span class="n">mace_train_cmd</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">mace_cmd</span><span class="si">}</span><span class="s1"> --config </span><span class="si">{</span><span class="n">MACE_INPUT_FILE</span><span class="si">}</span><span class="s1"> </span><span class="si">{</span><span class="n">mace_train_opts</span><span class="si">}</span><span class="s1">&#39;</span>
 
     <span class="c1"># MACE restart logic: check for checkpoint files and restart accordingly</span>
@@ -781,8 +795,13 @@ document.write(`
     <span class="p">)</span>
 
     <span class="k">if</span> <span class="n">compress_model</span><span class="p">:</span>
-        <span class="n">steps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">BashStep</span><span class="p">(</span><span class="n">cmd</span><span class="o">=</span><span class="p">[</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">mace_cmd</span><span class="si">}</span><span class="s1"> mace_create_lammps_model&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">model_name</span><span class="si">}</span><span class="s1">.model&#39;</span><span class="p">,</span> <span class="s1">&#39;--format=mliap&#39;</span><span class="p">],</span>
-                              <span class="n">cwd</span><span class="o">=</span><span class="n">cwd</span><span class="p">))</span>
+        <span class="c1"># Build compression command using the same environment prefix</span>
+        <span class="k">if</span> <span class="n">env_prefix</span><span class="p">:</span>
+            <span class="n">compress_cmd</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">env_prefix</span><span class="si">}</span><span class="s1"> mace_create_lammps_model </span><span class="si">{</span><span class="n">model_name</span><span class="si">}</span><span class="s1">.model --format=mliap&#39;</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">compress_cmd</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;mace_create_lammps_model </span><span class="si">{</span><span class="n">model_name</span><span class="si">}</span><span class="s1">.model --format=mliap&#39;</span>
+        
+        <span class="n">steps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">BashStep</span><span class="p">(</span><span class="n">cmd</span><span class="o">=</span><span class="n">compress_cmd</span><span class="p">,</span> <span class="n">cwd</span><span class="o">=</span><span class="n">cwd</span><span class="p">))</span>
     <span class="k">return</span> <span class="n">steps</span>
 
 
