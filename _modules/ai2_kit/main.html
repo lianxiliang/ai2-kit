@@ -520,6 +520,14 @@ document.write(`
         <span class="k">return</span> <span class="n">BatchTool</span>
 
     <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">mace_model_devi</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        MACE model deviation calculation tool.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">ai2_kit.tool.mace_devi</span><span class="w"> </span><span class="kn">import</span> <span class="n">MaceModelDeviTool</span>
+        <span class="k">return</span> <span class="n">MaceModelDeviTool</span>
+
+    <span class="nd">@property</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">frame</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
         <span class="kn">from</span><span class="w"> </span><span class="nn">ai2_kit.tool.frame</span><span class="w"> </span><span class="kn">import</span> <span class="n">FrameTool</span>
         <span class="k">return</span> <span class="n">FrameTool</span>

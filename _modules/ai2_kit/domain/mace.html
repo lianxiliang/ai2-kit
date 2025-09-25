@@ -686,12 +686,12 @@ document.write(`
         <span class="k">if</span> <span class="n">ctx</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">multi_gpus_per_job</span><span class="p">:</span>
             <span class="n">script</span> <span class="o">=</span> <span class="n">BashScript</span><span class="p">(</span>
                 <span class="n">template</span><span class="o">=</span><span class="n">ctx</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">script_template</span><span class="p">,</span>
-                <span class="n">steps</span><span class="o">=</span><span class="n">make_gpu_parallel_steps</span><span class="p">(</span><span class="n">steps_group</span><span class="p">),</span>
+                <span class="n">steps</span><span class="o">=</span><span class="n">make_gpu_parallel_steps</span><span class="p">(</span><span class="n">steps_group</span><span class="p">),</span>  <span class="c1"># type: ignore</span>
             <span class="p">)</span>
         <span class="k">else</span><span class="p">:</span>
             <span class="n">script</span> <span class="o">=</span> <span class="n">BashScript</span><span class="p">(</span>
                 <span class="n">template</span><span class="o">=</span><span class="n">ctx</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">script_template</span><span class="p">,</span>
-                <span class="n">steps</span><span class="o">=</span><span class="n">flatten</span><span class="p">(</span><span class="n">steps_group</span><span class="p">),</span>
+                <span class="n">steps</span><span class="o">=</span><span class="n">flatten</span><span class="p">(</span><span class="n">steps_group</span><span class="p">),</span>  <span class="c1"># type: ignore</span>
             <span class="p">)</span>
 
         <span class="n">job</span> <span class="o">=</span> <span class="n">executor</span><span class="o">.</span><span class="n">submit</span><span class="p">(</span><span class="n">script</span><span class="o">.</span><span class="n">render</span><span class="p">(),</span> <span class="n">cwd</span><span class="o">=</span><span class="n">tasks_dir</span><span class="p">)</span>
