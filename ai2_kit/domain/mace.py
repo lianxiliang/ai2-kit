@@ -248,12 +248,12 @@ async def cll_mace(input: CllMaceInput, ctx: CllMaceContext):
         if ctx.config.multi_gpus_per_job:
             script = BashScript(
                 template=ctx.config.script_template,
-                steps=make_gpu_parallel_steps(steps_group),
+                steps=make_gpu_parallel_steps(steps_group),  # type: ignore
             )
         else:
             script = BashScript(
                 template=ctx.config.script_template,
-                steps=flatten(steps_group),
+                steps=flatten(steps_group),  # type: ignore
             )
 
         job = executor.submit(script.render(), cwd=tasks_dir)
