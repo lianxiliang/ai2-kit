@@ -1,5 +1,8 @@
 from ai2_kit.core.artifact import Artifact, ArtifactDict
 from ai2_kit.core.log import get_logger
+from ai2_kit.core.script import BashStep, BashScript, make_gpu_parallel_steps
+from ai2_kit.core.job import gather_jobs
+from ai2_kit.core.util import list_split
 
 from typing import List, Optional, Mapping
 from dataclasses import dataclass
@@ -12,9 +15,8 @@ from .lammps import (
     CllLammpsContextConfig,
     CllLammpsInput,
     CllLammpsContext,
-    cll_lammps,
+    cll_lammps,  # Import back for reuse
 )
-from ai2_kit.tool.mace_devi import calculate_mace_model_deviation
 
 logger = get_logger(__name__)
 
@@ -105,93 +107,169 @@ def _get_mace_models_variables(models: List[Artifact]):
 
 async def cll_mace_lammps(input: CllMaceLammpsInput, ctx: CllMaceLammpsContext):
     """
-    MACE-enabled LAMMPS exploration using mace preset template
+    MACE-enabled LAMMPS exploration with integrated model deviation calculation.
+    
+    This function creates custom bash steps that run both LAMMPS simulation AND 
+    MACE model deviation calculation in the SAME job submissions.
     """
     logger.info(f'Starting MACE-LAMMPS exploration with {len(input.mace_models)} models on device: {input.device}')
     
-    # Generate MACE template variables (same pattern as DeepMD)
+    # We need to create our own bash steps instead of calling cll_lammps
+    # because we need to modify the commands BEFORE job submission
+    
+    executor = ctx.resource_manager.default_executor
+    
+    # Setup workspace (same as cll_lammps)
+    work_dir = os.path.join(executor.work_dir, ctx.path_prefix)
+    
+    # Generate MACE template variables
     mace_template_vars = _get_mace_models_variables(input.mace_models)
     
-    # Prepare LAMMPS configuration with MACE template variables
-    config_dict = input.config.dict()
-    config_dict['template_vars'] = {
-        **input.config.template_vars,
-        **mace_template_vars,
-    }
+    # Import required functions from lammps module
+    from .lammps import make_lammps_task_dirs
     
-    # Handle fep_opts properly - if it exists as dict, convert back to FepOptions object
-    if 'fep_opts' in config_dict and isinstance(config_dict['fep_opts'], dict):
-        from .lammps import FepOptions
-        config_dict['fep_opts'] = FepOptions(**config_dict['fep_opts'])
+    # Get data files: use new_system_files if available, otherwise fall back to system_files
+    if input.new_system_files and len(input.new_system_files) > 0:
+        data_files = input.new_system_files
+    else:
+        data_files = ctx.resource_manager.resolve_artifacts(input.config.system_files)
     
-    lammps_config = CllLammpsInputConfig(**config_dict)
+    assert len(data_files) > 0, 'no data files found for MACE-LAMMPS exploration'
     
-    # Create LAMMPS input using the configured preset template
-    lammps_input = CllLammpsInput(
-        config=lammps_config,
+    # Create LAMMPS task directories (reuse lammps logic)
+    tasks_dir, task_dirs = executor.run_python_fn(make_lammps_task_dirs)(
+        combination_vars=input.config.explore_vars,
+        broadcast_vars=input.config.broadcast_vars,
+        data_files=[a.to_dict() for a in data_files],
+        dp_models={},  # Empty - we use MACE through preset template
+        n_steps=input.config.nsteps,
+        timestep=input.config.timestep,
+        sample_freq=input.config.sample_freq,
+        no_pbc=input.config.no_pbc,
+        n_wise=input.config.n_wise,
+        ensemble=input.config.ensemble,
+        fix_statement=input.config.fix_statement,
+        preset_template=input.config.preset_template or 'mace',
+        input_template=input.config.input_template,
+        plumed_config=input.config.plumed_config,
+        extra_template_vars={**input.config.template_vars, **mace_template_vars},
         type_map=input.type_map,
         mass_map=input.mass_map,
+        type_alias=input.config.type_alias,
+        work_dir=work_dir,
         mode=input.mode,
-        preset_template=input.config.preset_template or 'mace',  # Default to 'mace' if not specified
-        new_system_files=input.new_system_files or [],
-        dp_models={},  # Empty - we use MACE through preset template
         dp_modifier=None,
         dp_sel_type=None,
+        fep_opts=input.config.fep_opts,
+        custom_ff=input.config.custom_ff,
     )
     
-    # Create LAMMPS context
-    lammps_ctx = CllLammpsContext(
-        config=ctx.config,
-        path_prefix=ctx.path_prefix,
-        resource_manager=ctx.resource_manager,
-    )
+    # Extract SLURM environment prefix from lammps_cmd for MACE model deviation
+    lammps_cmd_full = ctx.config.lammps_cmd
     
-    # Run the existing LAMMPS workflow (no modifications needed!)
-    logger.info('Running LAMMPS simulation with MACE force field')
-    lammps_output = await cll_lammps(lammps_input, lammps_ctx)
+    # Parse SLURM prefix (everything before the actual 'lmp' command)
+    # Example: "srun --environment=mace-lmp-plumed --container-workdir=$PWD --cpu-bind=socket --ntasks=1 --gres=gpu:1 lmp ..."
+    # We want: "srun --environment=mace-lmp-plumed --container-workdir=$PWD --cpu-bind=socket --ntasks=1 --gres=gpu:1"
+    slurm_prefix = ""
+    if 'lmp' in lammps_cmd_full:
+        # Use regex to find 'lmp' followed by space or arguments (actual lmp command, not part of other words)
+        import re
+        lmp_match = re.search(r'\blmp\s+', lammps_cmd_full)
+        if not lmp_match:
+            # Try to find 'lmp' at end of string or followed by non-alphanumeric
+            lmp_match = re.search(r'\blmp(?=\s|$|[^a-zA-Z0-9_-])', lammps_cmd_full)
+        
+        if lmp_match and lmp_match.start() > 0:
+            # Extract everything before 'lmp' as the SLURM prefix
+            slurm_prefix = lammps_cmd_full[:lmp_match.start()].strip()
+            logger.info(f'Extracted SLURM prefix for MACE: {slurm_prefix}')
     
-    # Post-process: Calculate MACE model deviation only
-    logger.info('Post-processing: calculating MACE model deviation')
-    mace_outputs = []
-    executor = ctx.resource_manager.default_executor
-    mace_models_paths = [m.url for m in input.mace_models]
+    # Prepare MACE model deviation command components  
+    mace_models_str = ' '.join([m.url for m in input.mace_models])
+    type_map_str = ','.join(input.type_map) if input.type_map else ''
     
-    for lammps_artifact in lammps_output.model_devi_outputs:
-        task_dir = lammps_artifact.url
+    # Build MACE model deviation command using standalone package
+    # Use mace-model-devi command directly (cleaner than ai2-kit tool)
+    mace_cmd_args = [
+        'mace-model-devi',
+        '--models', f'"{mace_models_str}"',
+        '--traj', 'traj.lammpstrj',
+        '--output', 'model_devi.out',
+        '--device', input.device,
+    ]
+    if type_map_str:
+        mace_cmd_args.extend(['--type-map', f'"{type_map_str}"'])
+    
+    base_mace_cmd = ' '.join(mace_cmd_args)
+    
+    # Apply SLURM prefix to MACE command if needed
+    if slurm_prefix:
+        # When using SLURM container, use standalone mace-model-deviation package directly
+        # No conda activation needed - package should be installed in container
+        mace_cmd = f'{slurm_prefix} {base_mace_cmd}'
+    else:
+        # For non-SLURM environments, use standalone package directly
+        mace_cmd = base_mace_cmd
+    
+    # Create combined bash steps (LAMMPS + MACE model deviation in same job)
+    base_lammps_cmd = f'{ctx.config.lammps_cmd} -i lammps.input'
+    
+    steps = []
+    for task_dir in task_dirs:
+        # LAMMPS simulation command
+        lammps_cmd = f'if [ -f md.restart.* ]; then {base_lammps_cmd} -v restart 1; else {base_lammps_cmd} -v restart 0; fi'
         
-        # Standard MACE-LAMMPS simulation (no FEP complexity)
-        traj_path = os.path.join(task_dir, 'traj.lammpstrj')
-        model_devi_path = os.path.join(task_dir, 'model_devi.out')
+        # Combined command: LAMMPS followed by MACE model deviation
+        combined_cmd = f'{lammps_cmd} && {mace_cmd}'
         
-        # Calculate MACE model deviation
-        if os.path.exists(traj_path):
-            try:
-                executor.run_python_fn(calculate_mace_model_deviation)(
-                    model_files=mace_models_paths,
-                    traj_file=traj_path,
-                    output_file=model_devi_path,
-                    type_map=input.type_map,
-                    device=input.device,  # Pass device for MACE calculator
-                )
-                logger.debug(f'MACE model deviation calculated on device {input.device}: {model_devi_path}')
-            except Exception as e:
-                logger.warning(f'Failed to calculate MACE model deviation for {traj_path}: {e}')
-                if not input.config.ignore_error:
-                    raise
-        
-        # Create artifact with MACE-specific attributes
+        # Single bash step that does both operations
+        steps.append(BashStep(
+            cwd=task_dir['url'],
+            cmd=combined_cmd,
+            checkpoint='mace-lammps-combined',
+            exit_on_error=not input.config.ignore_error
+        ))
+    
+    # Submit jobs with the combined steps (same as cll_lammps)
+    jobs = []
+    for i, steps_group in enumerate(list_split(steps, ctx.config.concurrency)):
+        if not steps_group:
+            continue
+            
+        if ctx.config.multi_gpus_per_job:
+            script = BashScript(
+                template=ctx.config.script_template,
+                steps=make_gpu_parallel_steps(steps_group),  # type: ignore
+            )
+        else:
+            script = BashScript(
+                template=ctx.config.script_template,
+                steps=steps_group,
+            )
+            
+        job = executor.submit(script.render(), cwd=tasks_dir)
+        jobs.append(job)
+    
+    logger.info(f'Submitted {len(jobs)} combined MACE-LAMMPS jobs')
+    
+    # Wait for ALL jobs to complete (both LAMMPS + model deviation)
+    await gather_jobs(jobs, max_tries=2)
+    
+    # Build outputs - both LAMMPS and model deviation are complete
+    outputs = []
+    for task_dir in task_dirs:
         mace_artifact = Artifact.of(
-            url=task_dir,
+            url=task_dir['url'],
             format=DataFormat.LAMMPS_OUTPUT_DIR,
             attrs={
-                **lammps_artifact.attrs,
+                **task_dir['attrs'],
                 'model_devi_file': 'model_devi.out',
                 'structures': 'traj.lammpstrj',
                 'mace_models_count': len(input.mace_models),
                 'force_field': 'mace',
             }
         )
-        mace_outputs.append(mace_artifact)
+        outputs.append(mace_artifact)
     
-    logger.info(f'MACE-LAMMPS exploration completed. Generated {len(mace_outputs)} outputs')
-    return GenericMaceLammpsOutput(model_devi_outputs=mace_outputs)
+    logger.info(f'MACE-LAMMPS exploration completed. Generated {len(outputs)} outputs with integrated model deviation')
+    return GenericMaceLammpsOutput(model_devi_outputs=outputs)

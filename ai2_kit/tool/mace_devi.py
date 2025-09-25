@@ -1,16 +1,150 @@
 from ai2_kit.core.log import get_logger
-from ai2_kit.core.util import ensure_dir, expand_globs, slice_from_str
-from ai2_kit.tool.ase import AseTool
-from ai2_kit.tool.frame import FrameTool
+from ai2_kit.core.util import ensure_dir
 
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 import ase.io
+from ase import Atoms
 import numpy as np
 import os
-import re
-import tempfile
 
 logger = get_logger(__name__)
+
+
+class MaceModelDeviTool:
+    """
+    CLI tool for MACE model deviation calculation.
+    Uses standalone mace-model-deviation package if available, fallback to built-in implementation.
+    """
+    
+    def calculate(
+        self,
+        models: str,
+        traj: str,
+        output: str,
+        type_map: Optional[Union[str, tuple, list]] = None,
+        device: str = 'cuda',
+        batch_size: int = 64,
+        default_dtype: str = 'float64'
+    ) -> str:
+        """
+        Calculate MACE model deviation from command line.
+        
+        :param models: space-separated list of MACE model file paths
+        :param traj: path to trajectory file
+        :param output: path to output model_devi.out file
+        :param type_map: element symbols (comma-separated string or tuple/list)
+        :param device: device for calculation ('cuda', 'cpu', 'mps')
+        :param batch_size: batch size for processing
+        :param default_dtype: torch dtype ('float32', 'float64')
+        :return: path to output file
+        """
+        # Try to use standalone mace-model-deviation package first
+        try:
+            import subprocess
+            import shutil
+            
+            # Check if mace-model-devi command is available
+            if shutil.which('mace-model-devi'):
+                logger.info("Using standalone mace-model-deviation package")
+                return self._use_standalone_package(models, traj, output, type_map, device, batch_size, default_dtype)
+        except Exception as e:
+            logger.warning(f"Standalone package not available, using built-in implementation: {e}")
+        
+        # Fallback to built-in implementation
+        logger.info("Using built-in MACE model deviation implementation")
+        return self._use_builtin_implementation(models, traj, output, type_map, device, batch_size, default_dtype)
+    
+    def _use_standalone_package(
+        self,
+        models: str,
+        traj: str,
+        output: str,
+        type_map: Optional[Union[str, tuple, list]] = None,
+        device: str = 'cuda',
+        batch_size: int = 64,
+        default_dtype: str = 'float64'
+    ) -> str:
+        """Use the standalone mace-model-deviation package via subprocess"""
+        import subprocess
+        
+        # Build command for standalone package
+        cmd = [
+            'mace-model-devi',
+            '--models'] + models.strip().split() + [
+            '--traj', traj,
+            '--output', output,
+            '--device', device,
+            '--batch-size', str(batch_size),
+            '--default-dtype', default_dtype
+        ]
+        
+        # Add type-map if provided
+        if type_map:
+            if isinstance(type_map, str):
+                type_map_str = type_map
+            elif isinstance(type_map, (tuple, list)):
+                type_map_str = ','.join(str(t).strip() for t in type_map)
+            else:
+                raise ValueError(f"Invalid type_map format: {type(type_map)}")
+            cmd.extend(['--type-map', type_map_str])
+        
+        logger.info(f"Running: {' '.join(cmd)}")
+        
+        # Execute the standalone command
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            logger.error(f"Standalone package failed: {result.stderr}")
+            raise RuntimeError(f"mace-model-devi command failed: {result.stderr}")
+        
+        logger.info("Standalone package execution completed successfully")
+        return output
+    
+    def _use_builtin_implementation(
+        self,
+        models: str,
+        traj: str,
+        output: str,
+        type_map: Optional[Union[str, tuple, list]] = None,
+        device: str = 'cuda',
+        batch_size: int = 64,
+        default_dtype: str = 'float64'
+    ) -> str:
+        """Use the built-in implementation as fallback"""
+        # Parse model files from space-separated string
+        model_files = models.strip().split()
+        
+        # Parse type_map from comma-separated string or tuple
+        type_map_list = None
+        if type_map:
+            if isinstance(type_map, str):
+                # Handle string input: "O,H" -> ["O", "H"]
+                type_map_list = [t.strip() for t in type_map.split(',')]
+            elif isinstance(type_map, (tuple, list)):
+                # Handle tuple/list input from Fire CLI: ("O", "H") -> ["O", "H"] 
+                type_map_list = [str(t).strip() for t in type_map]
+            else:
+                raise ValueError(f"Invalid type_map format: {type(type_map)}. Expected string or tuple.")
+        
+        logger.info(f"MACE model deviation calculation starting")
+        logger.info(f"Models: {len(model_files)} files")
+        logger.info(f"Trajectory: {traj}")
+        logger.info(f"Output: {output}")
+        logger.info(f"Device: {device}")
+        
+        # Call the main calculation function
+        result = calculate_mace_model_deviation(
+            model_files=model_files,
+            traj_file=traj,
+            output_file=output,
+            type_map=type_map_list,
+            device=device,
+            batch_size=batch_size,
+            default_dtype=default_dtype
+        )
+        
+        logger.info(f"MACE model deviation calculation completed: {result}")
+        return result
 
 
 def calculate_mace_model_deviation(
@@ -41,15 +175,33 @@ def calculate_mace_model_deviation(
     :param batch_size: batch size for MACE evaluation (default: 64)
     :param default_dtype: default data type for torch ('float32', 'float64')
     :return: path to the output file
+    :raises FileNotFoundError: if trajectory file does not exist
+    :raises ValueError: if less than 2 models provided or invalid parameters
+    :raises ImportError: if required MACE packages are not available
     """
+    # Input validation
+    if not model_files:
+        raise ValueError("No model files provided")
+    
+    if len(model_files) < 2:
+        raise ValueError(f"Need at least 2 models for meaningful deviation calculation, got {len(model_files)}")
+    
+    if not traj_file:
+        raise ValueError("Trajectory file path is required")
+    
+    if not output_file:
+        raise ValueError("Output file path is required")
+    
     logger.info(f"calculating MACE model deviation with {len(model_files)} models on device: {device}")
     logger.info(f"processing trajectory: {traj_file}")
     
     if not os.path.exists(traj_file):
         raise FileNotFoundError(f"trajectory file not found: {traj_file}")
     
-    if len(model_files) < 2:
-        logger.warning("need at least 2 models for meaningful deviation calculation")
+    # Validate model files exist
+    missing_models = [f for f in model_files if not os.path.exists(f)]
+    if missing_models:
+        raise FileNotFoundError(f"Model files not found: {missing_models}")
     
     # check if MACE is available
     try:
@@ -58,25 +210,22 @@ def calculate_mace_model_deviation(
         from mace.tools import torch_tools, utils
         use_real_mace = True
         logger.info("MACE package found - using direct torch evaluation approach")
-    except ImportError:
-        use_real_mace = False
-        logger.warning("MACE package not found - using placeholder calculation")
-        return _calculate_placeholder_deviation(model_files, [], output_file)
+    except ImportError as e:
+        logger.error(f"MACE package not found: {e}")
+        logger.error("Cannot calculate model deviation without MACE - this is required for MACE workflows")
+        raise ImportError(f"MACE packages required for model deviation calculation: {e}")
     
     # read trajectory frames with reference data
     frames = _read_trajectory_frames(traj_file, type_map)
     logger.info(f"loaded {len(frames)} frames from trajectory")
     
     # calculate model deviation using direct MACE evaluation
-    if use_real_mace and len(model_files) > 1:
-        frame_deviations = _calculate_mace_deviation_direct(
-            frames, model_files, device, default_dtype
-        )
-        # write results
-        _write_deviation_results(frame_deviations, output_file)
-    else:
-        # fallback to placeholder
-        _calculate_placeholder_deviation(model_files, frames, output_file)
+    logger.info(f"Calculating real MACE model deviation with {len(model_files)} models")
+    frame_deviations = _calculate_mace_deviation_direct(
+        frames, model_files, device, default_dtype, batch_size
+    )
+    # write results
+    _write_deviation_results(frame_deviations, output_file)
     
     logger.info(f"model deviation calculation complete: {output_file}")
     return output_file
@@ -85,7 +234,7 @@ def calculate_mace_model_deviation(
 def _read_trajectory_frames(
     trajectory_file: str, 
     type_map: Optional[List[str]] = None
-) -> List[Any]:
+) -> List[Atoms]:
     """
     Read trajectory frames using ASE with proper format and type ordering
     Reads all frames since trajectory was already written with desired sampling
@@ -133,10 +282,11 @@ def _read_trajectory_frames(
 
 
 def _calculate_mace_deviation_direct(
-    frames: List[Any],
+    frames: List[Atoms],
     model_files: List[str],
     device: str = 'cuda',
-    default_dtype: str = 'float64'
+    default_dtype: str = 'float64',
+    batch_size: int = 64
 ) -> List[Dict[str, float]]:
     """
     Calculate MACE model deviation using direct torch evaluation
@@ -155,10 +305,6 @@ def _calculate_mace_deviation_direct(
         from mace import data
         from mace.tools import torch_tools, utils
         
-        if len(model_files) < 2:
-            logger.warning("Need at least 2 models for deviation calculation")
-            return [_get_placeholder_frame_deviation(i) for i in range(len(frames))]
-        
         logger.info(f"evaluating {len(model_files)} models on {len(frames)} frames using direct torch")
         
         # set up torch configuration following MACE eval_configs.py style
@@ -174,18 +320,27 @@ def _calculate_mace_deviation_direct(
         for model_idx, model_file in enumerate(model_files):
             logger.info(f"loading model {model_idx + 1}/{len(model_files)}: {os.path.basename(model_file)}")
             model = torch.load(f=model_file, map_location=torch_device)
+            
+            # Ensure model is in the right dtype
+            if default_dtype == 'float64':
+                model = model.double()
+            elif default_dtype == 'float32':
+                model = model.float()
+            
             model = model.to(torch_device)
             
-            # disable gradients for inference
+            # disable gradients for inference to save memory
             for param in model.parameters():
                 param.requires_grad = False
             model.eval()
             
             models.append(model)
         
-        # evaluate all models on all configurations
-        all_virials = []  # (n_models, n_frames, 6) - virial tensors
-        all_forces = []   # (n_models, n_frames, n_atoms, 3)
+        # Pre-allocate arrays to save memory - more efficient than appending lists
+        n_models = len(models) 
+        n_frames = len(frames)
+        all_energies = np.zeros((n_models, n_frames))
+        all_forces = []  # Keep as list due to variable atom counts
         
         for model_idx, model in enumerate(models):
             logger.info(f"evaluating model {model_idx + 1}/{len(models)}")
@@ -200,75 +355,97 @@ def _calculate_mace_deviation_direct(
                 heads = None
             
             # convert configs to MACE data format
-            dataset = [
-                data.AtomicData.from_config(
+            dataset = []
+            for config in configs:
+                # Configs are already MACE Configuration objects from data.config_from_atoms()
+                atomic_data = data.AtomicData.from_config(
                     config, z_table=z_table, cutoff=float(model.r_max), heads=heads
                 )
-                for config in configs
-            ]
+                dataset.append(atomic_data)
             
-            model_virials = []
             model_forces = []
             
-            # evaluate each configuration
-            with torch.no_grad():
-                for config_idx, atomic_data in enumerate(dataset):
-                    batch = atomic_data.to(torch_device)
+            # evaluate each configuration - process in chunks for better memory management
+            chunk_size = min(batch_size, len(dataset))  # Use batch_size parameter for chunking
+            for chunk_start in range(0, len(dataset), chunk_size):
+                chunk_end = min(chunk_start + chunk_size, len(dataset))
+                chunk_data = dataset[chunk_start:chunk_end]
+                
+                # Process chunk
+                for i, atomic_data in enumerate(chunk_data):
+                    config_idx = chunk_start + i
                     
-                    # direct model evaluation
-                    output = model(batch.to_dict())
+                    # Create a proper batch with batch indices
+                    batch_dict = atomic_data.to_dict()
+                    n_atoms = len(batch_dict['positions'])
+                    batch_dict['batch'] = torch.zeros(n_atoms, dtype=torch.long)
                     
-                    # extract virial/stress if available, otherwise use energy as proxy
-                    if "stress" in output:
-                        stress = torch_tools.to_numpy(output["stress"])
-                        # Convert stress to virial-like quantity for deviation analysis
-                        virial = stress.flatten()  # 6 components: xx, yy, zz, xy, xz, yz
-                    elif "virial" in output:
-                        virial = torch_tools.to_numpy(output["virial"]).flatten()
-                    else:
-                        # Fallback: use energy per atom as virial proxy
-                        energy = torch_tools.to_numpy(output["energy"]).item()
-                        virial = np.array([energy / len(frames[config_idx])] * 6)  # 6 components
+                    # Add ptr field for PyTorch Geometric batch processing
+                    batch_dict['ptr'] = torch.tensor([0, n_atoms], dtype=torch.long)
                     
+                    # Handle head field properly - expand scalar to per-atom if needed
+                    if 'head' in batch_dict and torch.is_tensor(batch_dict['head']) and batch_dict['head'].dim() == 0:
+                        # Convert scalar head to per-atom head
+                        batch_dict['head'] = batch_dict['head'].expand(n_atoms)
+                    
+                    # Move to device and set proper dtypes
+                    for key, value in batch_dict.items():
+                        if torch.is_tensor(value):
+                            batch_dict[key] = value.to(torch_device)
+                            # Enable gradients for positions to compute forces
+                            if key == 'positions':
+                                batch_dict[key] = batch_dict[key].requires_grad_(True)
+                    
+                    # model evaluation with gradient computation for forces
+                    with torch.enable_grad():
+                        output = model(batch_dict)
+                    
+                    # extract energy and forces - convert to numpy immediately to save GPU memory
+                    energy = torch_tools.to_numpy(output["energy"]).item()
                     forces = torch_tools.to_numpy(output["forces"])
                     
-                    model_virials.append(virial)
+                    # Store directly in pre-allocated array
+                    all_energies[model_idx, config_idx] = energy
                     model_forces.append(forces)
+                    
+                    # Clear intermediate tensors for memory efficiency
+                    del output, batch_dict
+                    if torch_device.type == 'cuda':
+                        torch.cuda.empty_cache()
             
-            all_virials.append(model_virials)
             all_forces.append(model_forces)
             
-            # clear model from GPU memory if using CUDA
+            # clear model from GPU memory after processing
             if torch_device.type == 'cuda':
                 torch.cuda.empty_cache()
         
-        # convert to numpy arrays for deviation calculation
-        all_virials = np.array(all_virials)  # (n_models, n_frames, 6)
+        # convert lists to arrays - all_energies is already a numpy array
+        # all_forces remains a list of lists due to variable atom counts per frame
         
         frame_deviations = []
         
         for frame_idx in range(len(frames)):
-            # virial deviation for this frame
-            frame_virials = all_virials[:, frame_idx, :]  # (n_models, 6)
-            virial_std = np.std(frame_virials, axis=0)  # (6,) - std for each virial component
+            # ENERGY deviation for this frame (replaces virial in DeepMD format)
+            frame_energies = all_energies[:, frame_idx]  # (n_models,)
+            energy_std = np.std(frame_energies)  # standard deviation across models
+            energy_mean = np.mean(frame_energies)
             
-            # Use maximum virial component deviation as the representative deviation
-            # This follows DeepMD convention for virial deviation analysis
-            max_virial_devi = float(np.max(virial_std))
-            min_virial_devi = float(np.min(virial_std))
-            avg_virial_devi = float(np.mean(virial_std))
+            # Use energy std as both max/min/avg "virial" for DeepMD compatibility
+            # This represents energy uncertainty, which is more meaningful for MACE than fake virial
+            max_energy_devi = float(energy_std)
+            min_energy_devi = float(energy_std) 
+            avg_energy_devi = float(energy_std)
             
-            # force deviation for this frame
+            # force deviation for this frame (unchanged - this part was correct)
             frame_forces = np.array([all_forces[model_idx][frame_idx] for model_idx in range(len(models))])
             # shape: (n_models, n_atoms, 3)
             
             # Debug: verify data structure
             if frame_idx == 0:  # Only log for first frame
-                logger.debug(f"Frame forces shape: {frame_forces.shape}")
-                logger.debug(f"Frame virials shape: {frame_virials.shape}")
-                logger.debug(f"Expected shapes: forces ({len(models)}, n_atoms, 3), virials ({len(models)}, 6)")
+                logger.info(f"Frame {frame_idx}: energy_mean={energy_mean:.6f}, energy_std={energy_std:.6f}")
+                logger.info(f"Frame forces shape: {frame_forces.shape}")
             
-            # DeepMD-style force deviation calculation
+            # DeepMD-style force deviation calculation (unchanged)
             n_atoms = frame_forces.shape[1]
             mean_forces = np.mean(frame_forces, axis=0)  # (n_atoms, 3)
             
@@ -277,11 +454,11 @@ def _calculate_mace_deviation_direct(
             squared_norms = np.sum(deviations**2, axis=2)  # (n_models, n_atoms) - L2 norm squared per atom per model
             force_deviations_per_atom = np.sqrt(np.mean(squared_norms, axis=0))  # (n_atoms,) - RMS across models
             
-            # frame deviation statistics (now using virial instead of energy)
+            # frame deviation statistics (now using energy deviation instead of virial)
             frame_deviation = {
-                'max_devi_v': max_virial_devi,
-                'min_devi_v': min_virial_devi, 
-                'avg_devi_v': avg_virial_devi,
+                'max_devi_v': max_energy_devi,
+                'min_devi_v': min_energy_devi, 
+                'avg_devi_v': avg_energy_devi,
                 'max_devi_f': float(np.max(force_deviations_per_atom)),
                 'min_devi_f': float(np.min(force_deviations_per_atom)),
                 'avg_devi_f': float(np.mean(force_deviations_per_atom)),
@@ -295,29 +472,10 @@ def _calculate_mace_deviation_direct(
         
         return frame_deviations
         
-    except ImportError as e:
-        logger.warning(f"MACE/torch packages not available: {e}, using placeholder calculations")
-        return [_get_placeholder_frame_deviation(i) for i in range(len(frames))]
     except Exception as e:
-        logger.warning(f"MACE deviation calculation failed: {e}, using placeholder")
-        return [_get_placeholder_frame_deviation(i) for i in range(len(frames))]
-
-
-def _get_placeholder_frame_deviation(frame_idx: int) -> Dict[str, float]:
-    """Generate placeholder deviation values for a single frame"""
-    import numpy as np
-    np.random.seed(frame_idx % 1000)
-    base_v = 0.001 + 0.0005 * np.random.random()  # virial deviation base
-    base_f = 0.05 + 0.03 * np.random.random()
-    
-    return {
-        'max_devi_v': base_v * (1.2 + 0.3 * np.random.random()),
-        'min_devi_v': base_v * (0.8 + 0.2 * np.random.random()),
-        'avg_devi_v': base_v,
-        'max_devi_f': base_f * (1.5 + 0.5 * np.random.random()),
-        'min_devi_f': base_f * (0.5 + 0.3 * np.random.random()),
-        'avg_devi_f': base_f,
-    }
+        logger.error(f"MACE deviation calculation failed: {e}")
+        logger.error("This is a critical error - real model deviation calculation is required")
+        raise RuntimeError(f"MACE model deviation calculation failed: {e}")
 
 
 def _write_deviation_results(
@@ -335,7 +493,8 @@ def _write_deviation_results(
     ensure_dir(output_file)
     
     with open(output_file, 'w') as f:
-        # write header matching DeepMD format exactly
+        # write header - keep 'devi_v' for ai2kit compatibility (represents energy deviation for MACE)
+        # Note: ai2kit expects max_devi_v/min_devi_v/avg_devi_v columns - using energy deviation as content
         f.write('#       step         max_devi_v         min_devi_v         avg_devi_v         max_devi_f         min_devi_f         avg_devi_f\n')
         
         for frame_idx, frame_deviation in enumerate(frame_deviations):
@@ -349,62 +508,3 @@ def _write_deviation_results(
                    f"{frame_deviation['avg_devi_f']:>14.6e}\n")
     
     logger.info(f"deviation statistics written to: {output_file}")
-
-
-def _calculate_placeholder_deviation(
-    model_files: List[str],
-    atoms_list: List[Any],
-    output_file: str
-) -> str:
-    """
-    placeholder MACE model deviation calculation for testing
-    
-    generates realistic dummy deviation values that follow the expected
-    patterns and format. this is used when MACE is not available or
-    for testing purposes.
-    
-    :param model_files: list of model files (for scaling calculations)
-    :param atoms_list: list of atoms objects
-    :param output_file: output file path
-    :return: path to output file
-    """
-    logger.warning("using placeholder model deviation calculation")
-    
-    ensure_dir(output_file)
-    
-    with open(output_file, 'w') as f:
-        # write header matching DeepMD format exactly
-        f.write('#       step         max_devi_v         min_devi_v         avg_devi_v         max_devi_f         min_devi_f         avg_devi_f\n')
-        
-        for i, atoms in enumerate(atoms_list):
-            # use frame index as timestep
-            timestep = i
-            
-            # generate realistic dummy values
-            n_models = len(model_files)
-            n_atoms = len(atoms)
-            
-            # base deviation scales with system size and model count
-            base_force_devi = 0.02 * np.sqrt(n_atoms / 10.0) * np.sqrt(n_models / 4.0)
-            base_virial_devi = 0.001 * n_atoms * np.sqrt(n_models / 4.0)  # virial instead of energy
-            
-            # add some variation across frames
-            frame_factor = 1.0 + 0.3 * np.sin(i * 0.1) + 0.1 * np.random.random()
-            
-            max_devi_f = base_force_devi * frame_factor * 2.0
-            min_devi_f = base_force_devi * frame_factor * 0.3
-            avg_devi_f = base_force_devi * frame_factor
-            
-            max_devi_v = base_virial_devi * frame_factor
-            min_devi_v = base_virial_devi * frame_factor * 0.5  
-            avg_devi_v = base_virial_devi * frame_factor * 0.8
-            
-            f.write(f'{timestep:8d} {max_devi_v:14.6e} {min_devi_v:14.6e} {avg_devi_v:14.6e} '
-                   f'{max_devi_f:14.6e} {min_devi_f:14.6e} {avg_devi_f:14.6e}\n')
-    
-    logger.info(f'placeholder model deviation results written to: {output_file}')
-    return output_file
-
-
-# for backward compatibility, keep the simple version available
-calculate_mace_model_deviation_simple = _calculate_placeholder_deviation

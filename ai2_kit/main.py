@@ -82,6 +82,14 @@ class ToolGroup:
         return BatchTool
 
     @property
+    def mace_model_devi(self):
+        """
+        MACE model deviation calculation tool.
+        """
+        from ai2_kit.tool.mace_devi import MaceModelDeviTool
+        return MaceModelDeviTool
+
+    @property
     def frame(self):
         from ai2_kit.tool.frame import FrameTool
         return FrameTool
