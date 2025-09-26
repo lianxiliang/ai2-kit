@@ -77,30 +77,63 @@ class GenericMaceLammpsOutput(ICllExploreOutput):
         return self.model_devi_outputs
 
 
-def _get_mace_models_variables(models: List[Artifact]):
-    """
-    Generate template variables for MACE models following DeepMD pattern
-    """
-    vars = {}
+def _select_best_mace_model(base_dir: str, model_name: str = "mace_model") -> tuple[str, str]:
+    """Select best MACE models for LAMMPS (prefers .pt) and deviation (requires .model)"""
     
-    if models:
-        # Use the first LAMMPS-optimized model for simulation
-        first_model = models[0]
+    def find_first_existing(candidates, fallback):
+        for filename in candidates:
+            path = os.path.join(base_dir, filename)
+            if os.path.exists(path):
+                return path
+        return os.path.join(base_dir, fallback)
+    
+    # LAMMPS: prefer compressed .pt files
+    lammps_model = find_first_existing([
+        f"{model_name}_stagetwo.model-mliap_lammps.pt",
+        f"{model_name}.model-mliap_lammps.pt", 
+        f"{model_name}_stagetwo.model",
+        f"{model_name}.model"
+    ], f"{model_name}.model")
+    
+    # Deviation: only .model files (CLI requirement)
+    deviation_model = find_first_existing([
+        f"{model_name}_stagetwo.model",
+        f"{model_name}.model"
+    ], f"{model_name}.model")
+    
+    return lammps_model, deviation_model
+
+
+def _get_mace_models_variables(models: List[Artifact]):
+    """Generate template variables for MACE models with intelligent file selection"""
+    vars = {}
+    if not models:
+        return vars
+    
+    lammps_models = []
+    deviation_models = []
+    
+    for m in models:
+        model_path = m.url
+        model_dir = model_path if os.path.isdir(model_path) else os.path.dirname(model_path)
         
-        # Get LAMMPS-compatible model path
-        base_path = first_model.url
-        if 'mliap_lammps.pt' in base_path:
-            vars['MACE_LAMMPS_MODEL'] = base_path
+        if model_dir:
+            lammps_model, deviation_model = _select_best_mace_model(model_dir)
+            lammps_models.append(lammps_model)
+            deviation_models.append(deviation_model)
         else:
-            vars['MACE_LAMMPS_MODEL'] = base_path.replace('.model', '.model-mliap_lammps.pt')
-        
-        # Store all models for post-processing and model deviation
-        model_paths = [m.url for m in models]
-        vars['MACE_MODELS'] = ' '.join(model_paths)
-        
-        # Individual model variables for flexibility
-        for i, m in enumerate(models):
-            vars[f'MACE_MODELS_{i}'] = m.url
+            # Use file as-is if no directory
+            lammps_models.append(model_path)
+            deviation_models.append(model_path)
+    
+    if lammps_models:
+        vars['MACE_LAMMPS_MODEL'] = lammps_models[0]
+        vars['MACE_MODELS'] = ' '.join(lammps_models)
+    
+    if deviation_models:
+        vars['MACE_MODELS_FOR_DEVIATION'] = ' '.join(deviation_models)
+        for i, m in enumerate(deviation_models):
+            vars[f'MACE_MODELS_{i}'] = m
     
     return vars
 
@@ -113,6 +146,10 @@ async def cll_mace_lammps(input: CllMaceLammpsInput, ctx: CllMaceLammpsContext):
     MACE model deviation calculation in the SAME job submissions.
     """
     logger.info(f'Starting MACE-LAMMPS exploration with {len(input.mace_models)} models on device: {input.device}')
+    
+    # Log the model files being used
+    for i, model in enumerate(input.mace_models):
+        logger.info(f'MACE model {i+1}: {model.url}')
     
     # We need to create our own bash steps instead of calling cll_lammps
     # because we need to modify the commands BEFORE job submission
@@ -184,12 +221,15 @@ async def cll_mace_lammps(input: CllMaceLammpsInput, ctx: CllMaceLammpsContext):
             slurm_prefix = lammps_cmd_full[:lmp_match.start()].strip()
             logger.info(f'Extracted SLURM prefix for MACE: {slurm_prefix}')
     
-    # Prepare MACE model deviation command components  
-    mace_models_str = ' '.join([m.url for m in input.mace_models])
+    # Use explicit model paths (more reliable than directory-based approach)
+    mace_models_str = mace_template_vars.get('MACE_MODELS_FOR_DEVIATION', '')
     type_map_str = ','.join(input.type_map) if input.type_map else ''
     
-    # Build MACE model deviation command using standalone package
-    # Use mace-model-devi command directly (cleaner than ai2-kit tool)
+    # Extract model filenames for logging
+    model_files_for_deviation = mace_models_str.split() if mace_models_str else []
+    logger.info(f'Using MACE models for deviation: {[os.path.basename(f) for f in model_files_for_deviation]}')
+    
+    # Build MACE model deviation command using explicit model paths
     mace_cmd_args = [
         'mace-model-devi',
         '--models', f'"{mace_models_str}"',
@@ -207,20 +247,33 @@ async def cll_mace_lammps(input: CllMaceLammpsInput, ctx: CllMaceLammpsContext):
         # When using SLURM container, use standalone mace-model-deviation package directly
         # No conda activation needed - package should be installed in container
         mace_cmd = f'{slurm_prefix} {base_mace_cmd}'
+        logger.info(f'Using SLURM environment for MACE: {slurm_prefix}')
     else:
         # For non-SLURM environments, use standalone package directly
         mace_cmd = base_mace_cmd
+        logger.info('Using direct MACE command (no SLURM)')
+    
+    logger.info(f'Final MACE command: {mace_cmd}')
     
     # Create combined bash steps (LAMMPS + MACE model deviation in same job)
     base_lammps_cmd = f'{ctx.config.lammps_cmd} -i lammps.input'
     
     steps = []
     for task_dir in task_dirs:
-        # LAMMPS simulation command
-        lammps_cmd = f'if [ -f md.restart.* ]; then {base_lammps_cmd} -v restart 1; else {base_lammps_cmd} -v restart 0; fi'
+        # Multi-line bash script for better readability
+        script_lines = [
+            '# Run LAMMPS simulation',
+            f'if [ -f md.restart.* ]; then',
+            f'    {base_lammps_cmd} -v restart 1',
+            f'else',
+            f'    {base_lammps_cmd} -v restart 0',
+            f'fi',
+            '',
+            '# Calculate MACE model deviation',
+            f'{mace_cmd}',
+        ]
         
-        # Combined command: LAMMPS followed by MACE model deviation
-        combined_cmd = f'{lammps_cmd} && {mace_cmd}'
+        combined_cmd = '\n'.join(script_lines)
         
         # Single bash step that does both operations
         steps.append(BashStep(

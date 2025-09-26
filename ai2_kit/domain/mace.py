@@ -268,21 +268,25 @@ async def cll_mace(input: CllMaceInput, ctx: CllMaceContext):
     for i, task_dir in enumerate(mace_task_dirs):
         
         # MACE creates multiple model files:
-        # 1. {name}.model - main MACE model
-        # 2. {name}.model-mliap_lammps.pt - LAMMPS-optimized model (created by mace_create_lammps_model)
+        # 1. {name}.model - base MACE model
+        # 2. {name}_stagetwo.model - stage-two optimized model (best for model deviation with CuEq)
+        # 3. {name}.model-mliap_lammps.pt - LAMMPS-optimized model (for LAMMPS simulation)
+        # 4. Various compiled versions (ignored for simplicity)
         
-        # Choose appropriate model file based on compression setting
-        if input.config.compress_model:
-            final_model_file = os.path.join(task_dir, MACE_LMP_MODEL)
-        else:
-            final_model_file = os.path.join(task_dir, MACE_FINAL_MODEL)
-        
+        # Output the entire task directory to allow intelligent model selection downstream
+        # This enables the exploration phase to select the appropriate model for each purpose:
+        # - LAMMPS simulation: *.model-mliap_lammps.pt
+        # - Model deviation: *_stagetwo.model (preferred) or *.model (fallback)
         models.append(Artifact.of(
-            url=final_model_file,
+            url=task_dir,  # Point to directory, not specific file
             format=DataFormat.MACE_MODEL,
             attrs={
+                'model_dir': task_dir,
+                'base_model': os.path.join(task_dir, MACE_FINAL_MODEL),
+                'lammps_model': os.path.join(task_dir, MACE_LMP_MODEL) if input.config.compress_model else None,
                 'logs_dir': os.path.join(task_dir, 'logs'),
                 'checkpoints_dir': os.path.join(task_dir, 'checkpoints'),
+                'has_compression': input.config.compress_model,
             }
         ))
 
@@ -357,11 +361,24 @@ def _build_mace_steps(mace_cmd: str,
     )
 
     if compress_model:
-        # Build compression command using the same environment prefix
+        # Build compression command - prioritize stage-two model if available
+        # Use stage-two model for LAMMPS compression if it exists, otherwise use base model
+        compress_cmd_base = 'mace_create_lammps_model'
+        model_selection_cmd = f'''
+# Select best model for LAMMPS compression
+if [ -f "{model_name}_stagetwo.model" ]; then
+    SOURCE_MODEL="{model_name}_stagetwo.model"
+    echo "Using stage-two model for LAMMPS compression: $SOURCE_MODEL"
+else
+    SOURCE_MODEL="{model_name}.model"
+    echo "Using base model for LAMMPS compression: $SOURCE_MODEL"
+fi
+'''
+        
         if env_prefix:
-            compress_cmd = f'{env_prefix} mace_create_lammps_model {model_name}.model --format=mliap'
+            compress_cmd = f'{model_selection_cmd}\n{env_prefix} {compress_cmd_base} $SOURCE_MODEL --format=mliap'
         else:
-            compress_cmd = f'mace_create_lammps_model {model_name}.model --format=mliap'
+            compress_cmd = f'{model_selection_cmd}\n{compress_cmd_base} $SOURCE_MODEL --format=mliap'
         
         steps.append(BashStep(cmd=compress_cmd, cwd=cwd))
     return steps
