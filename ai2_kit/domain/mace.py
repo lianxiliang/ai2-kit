@@ -273,19 +273,14 @@ async def cll_mace(input: CllMaceInput, ctx: CllMaceContext):
         # 3. {name}.model-mliap_lammps.pt - LAMMPS-optimized model (for LAMMPS simulation)
         # 4. Various compiled versions (ignored for simplicity)
         
-        # Output the entire task directory to allow intelligent model selection downstream
-        # This enables the exploration phase to select the appropriate model for each purpose:
-        # - LAMMPS simulation: *.model-mliap_lammps.pt
-        # - Model deviation: *_stagetwo.model (preferred) or *.model (fallback)
+        # Output the model directory to enable intelligent selection downstream
         models.append(Artifact.of(
-            url=task_dir,  # Point to directory, not specific file
+            url=task_dir,
             format=DataFormat.MACE_MODEL,
             attrs={
                 'model_dir': task_dir,
                 'base_model': os.path.join(task_dir, MACE_FINAL_MODEL),
                 'lammps_model': os.path.join(task_dir, MACE_LMP_MODEL) if input.config.compress_model else None,
-                'logs_dir': os.path.join(task_dir, 'logs'),
-                'checkpoints_dir': os.path.join(task_dir, 'checkpoints'),
                 'has_compression': input.config.compress_model,
             }
         ))
@@ -332,17 +327,9 @@ def _build_mace_steps(mace_cmd: str,
                         ):
     steps = []
     
-    # Split mace_cmd into environment prefix and actual command
-    # Expected format: "srun ... mace_run_train" -> ["srun ...", "mace_run_train"]
-    cmd_parts = mace_cmd.rsplit(' ', 1)  # Split from the right to get the last part
-    if len(cmd_parts) == 2:
-        env_prefix, base_cmd = cmd_parts
-        # Ensure base_cmd is actually a MACE command
-        if 'mace' not in base_cmd:
-            # Fallback: treat entire string as command
-            env_prefix, base_cmd = '', mace_cmd
-    else:
-        env_prefix, base_cmd = '', mace_cmd
+    # Extract environment prefix from mace command for compression
+    cmd_parts = mace_cmd.rsplit(' ', 1)
+    env_prefix = cmd_parts[0] if len(cmd_parts) == 2 and 'mace' in cmd_parts[1] else ''
     
     # Build training command
     mace_train_cmd = f'{mace_cmd} --config {MACE_INPUT_FILE} {mace_train_opts}'
@@ -361,24 +348,16 @@ def _build_mace_steps(mace_cmd: str,
     )
 
     if compress_model:
-        # Build compression command - prioritize stage-two model if available
-        # Use stage-two model for LAMMPS compression if it exists, otherwise use base model
-        compress_cmd_base = 'mace_create_lammps_model'
-        model_selection_cmd = f'''
-# Select best model for LAMMPS compression
+        # Intelligent model selection for LAMMPS compression
+        model_selection = f'''
 if [ -f "{model_name}_stagetwo.model" ]; then
     SOURCE_MODEL="{model_name}_stagetwo.model"
-    echo "Using stage-two model for LAMMPS compression: $SOURCE_MODEL"
 else
     SOURCE_MODEL="{model_name}.model"
-    echo "Using base model for LAMMPS compression: $SOURCE_MODEL"
 fi
 '''
-        
-        if env_prefix:
-            compress_cmd = f'{model_selection_cmd}\n{env_prefix} {compress_cmd_base} $SOURCE_MODEL --format=mliap'
-        else:
-            compress_cmd = f'{model_selection_cmd}\n{compress_cmd_base} $SOURCE_MODEL --format=mliap'
+        compress_base = 'mace_create_lammps_model'
+        compress_cmd = f'{model_selection}\n{env_prefix + " " if env_prefix else ""}{compress_base} $SOURCE_MODEL --format=mliap'
         
         steps.append(BashStep(cmd=compress_cmd, cwd=cwd))
     return steps

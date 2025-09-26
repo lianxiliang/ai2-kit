@@ -204,56 +204,31 @@ async def cll_mace_lammps(input: CllMaceLammpsInput, ctx: CllMaceLammpsContext):
     # Extract SLURM environment prefix from lammps_cmd for MACE model deviation
     lammps_cmd_full = ctx.config.lammps_cmd
     
-    # Parse SLURM prefix (everything before the actual 'lmp' command)
-    # Example: "srun --environment=mace-lmp-plumed --container-workdir=$PWD --cpu-bind=socket --ntasks=1 --gres=gpu:1 lmp ..."
-    # We want: "srun --environment=mace-lmp-plumed --container-workdir=$PWD --cpu-bind=socket --ntasks=1 --gres=gpu:1"
+    # Extract SLURM environment prefix for MACE model deviation
     slurm_prefix = ""
     if 'lmp' in lammps_cmd_full:
-        # Use regex to find 'lmp' followed by space or arguments (actual lmp command, not part of other words)
         import re
-        lmp_match = re.search(r'\blmp\s+', lammps_cmd_full)
-        if not lmp_match:
-            # Try to find 'lmp' at end of string or followed by non-alphanumeric
-            lmp_match = re.search(r'\blmp(?=\s|$|[^a-zA-Z0-9_-])', lammps_cmd_full)
-        
+        lmp_match = re.search(r'\blmp\s+', lammps_cmd_full) or re.search(r'\blmp(?=\s|$|[^a-zA-Z0-9_-])', lammps_cmd_full)
         if lmp_match and lmp_match.start() > 0:
-            # Extract everything before 'lmp' as the SLURM prefix
             slurm_prefix = lammps_cmd_full[:lmp_match.start()].strip()
-            logger.info(f'Extracted SLURM prefix for MACE: {slurm_prefix}')
     
-    # Use explicit model paths (more reliable than directory-based approach)
-    mace_models_str = mace_template_vars.get('MACE_MODELS_FOR_DEVIATION', '')
+    # Build MACE model deviation command
+    models_for_deviation = mace_template_vars.get('MACE_MODELS_FOR_DEVIATION', '')
     type_map_str = ','.join(input.type_map) if input.type_map else ''
     
-    # Extract model filenames for logging
-    model_files_for_deviation = mace_models_str.split() if mace_models_str else []
-    logger.info(f'Using MACE models for deviation: {[os.path.basename(f) for f in model_files_for_deviation]}')
-    
-    # Build MACE model deviation command using explicit model paths
     mace_cmd_args = [
         'mace-model-devi',
-        '--models', f'"{mace_models_str}"',
+        '--models', f'"{models_for_deviation}"',
         '--traj', 'traj.lammpstrj',
         '--output', 'model_devi.out',
         '--device', input.device,
     ]
+    
     if type_map_str:
         mace_cmd_args.extend(['--type-map', f'"{type_map_str}"'])
     
     base_mace_cmd = ' '.join(mace_cmd_args)
-    
-    # Apply SLURM prefix to MACE command if needed
-    if slurm_prefix:
-        # When using SLURM container, use standalone mace-model-deviation package directly
-        # No conda activation needed - package should be installed in container
-        mace_cmd = f'{slurm_prefix} {base_mace_cmd}'
-        logger.info(f'Using SLURM environment for MACE: {slurm_prefix}')
-    else:
-        # For non-SLURM environments, use standalone package directly
-        mace_cmd = base_mace_cmd
-        logger.info('Using direct MACE command (no SLURM)')
-    
-    logger.info(f'Final MACE command: {mace_cmd}')
+    mace_cmd = f'{slurm_prefix} {base_mace_cmd}' if slurm_prefix else base_mace_cmd
     
     # Create combined bash steps (LAMMPS + MACE model deviation in same job)
     base_lammps_cmd = f'{ctx.config.lammps_cmd} -i lammps.input'

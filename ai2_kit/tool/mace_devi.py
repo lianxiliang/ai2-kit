@@ -1,4 +1,14 @@
 from ai2_kit.core.log import get_logger
+
+logger = get_logger(__name__)
+
+def _is_cuequivariance_available():
+    try:
+        import cuequivariance_torch
+        return True
+    except ImportError:
+        return False
+
 from ai2_kit.core.util import ensure_dir
 
 from typing import List, Optional, Dict, Any, Union
@@ -24,7 +34,8 @@ class MaceModelDeviTool:
         type_map: Optional[Union[str, tuple, list]] = None,
         device: str = 'cuda',
         batch_size: int = 64,
-        default_dtype: str = 'float64'
+        default_dtype: str = 'float64',
+        enable_cueq: bool = False
     ) -> str:
         """
         Calculate MACE model deviation from command line.
@@ -36,21 +47,18 @@ class MaceModelDeviTool:
         :param device: device for calculation ('cuda', 'cpu', 'mps')
         :param batch_size: batch size for processing
         :param default_dtype: torch dtype ('float32', 'float64')
+        :param enable_cueq: enable CuEq acceleration for faster inference
         :return: path to output file
         """
-        # Try to use standalone mace-model-deviation package first
+        # Try standalone package first, fallback to built-in implementation
         try:
-            import subprocess
             import shutil
-            
-            # Check if mace-model-devi command is available
             if shutil.which('mace-model-devi'):
                 logger.info("Using standalone mace-model-deviation package")
-                return self._use_standalone_package(models, traj, output, type_map, device, batch_size, default_dtype)
+                return self._use_standalone_package(models, traj, output, type_map, device, batch_size, default_dtype, enable_cueq)
         except Exception as e:
-            logger.warning(f"Standalone package not available, using built-in implementation: {e}")
+            logger.warning(f"Standalone package failed: {e}")
         
-        # Fallback to built-in implementation
         logger.info("Using built-in MACE model deviation implementation")
         return self._use_builtin_implementation(models, traj, output, type_map, device, batch_size, default_dtype)
     
@@ -62,7 +70,8 @@ class MaceModelDeviTool:
         type_map: Optional[Union[str, tuple, list]] = None,
         device: str = 'cuda',
         batch_size: int = 64,
-        default_dtype: str = 'float64'
+        default_dtype: str = 'float64',
+        enable_cueq: bool = False
     ) -> str:
         """Use the standalone mace-model-deviation package via subprocess"""
         import subprocess
@@ -88,6 +97,12 @@ class MaceModelDeviTool:
                 raise ValueError(f"Invalid type_map format: {type(type_map)}")
             cmd.extend(['--type-map', type_map_str])
         
+        # Add enable-cueq if requested
+        if enable_cueq:
+            if not _is_cuequivariance_available():
+                raise RuntimeError("`enable_cueq` is requested but `cuequivariance_torch` is not installed.")
+            cmd.append('--enable-cueq')
+
         logger.info(f"Running: {' '.join(cmd)}")
         
         # Execute the standalone command
@@ -134,18 +149,9 @@ class MaceModelDeviTool:
         
         # Call the main calculation function
         result = calculate_mace_model_deviation(
-            model_files=model_files,
-            traj_file=traj,
-            output_file=output,
-            type_map=type_map_list,
-            device=device,
-            batch_size=batch_size,
-            default_dtype=default_dtype
+            model_files, traj, output, type_map_list, device=device, batch_size=batch_size, default_dtype=default_dtype
         )
-        
-        logger.info(f"MACE model deviation calculation completed: {result}")
         return result
-
 
 def calculate_mace_model_deviation(
     model_files: List[str],
@@ -227,7 +233,7 @@ def calculate_mace_model_deviation(
     # write results
     _write_deviation_results(frame_deviations, output_file)
     
-    logger.info(f"model deviation calculation complete: {output_file}")
+    logger.info(f"MACE model deviation calculation completed: {output_file}")
     return output_file
 
 
@@ -319,7 +325,18 @@ def _calculate_mace_deviation_direct(
         models = []
         for model_idx, model_file in enumerate(model_files):
             logger.info(f"loading model {model_idx + 1}/{len(model_files)}: {os.path.basename(model_file)}")
-            model = torch.load(f=model_file, map_location=torch_device)
+            
+            # Workaround for models trained with cuequivariance_torch on CPU
+            if not _is_cuequivariance_available() and device == 'cpu':
+                import sys
+                import types
+                # Mock the module with a proper ModuleType
+                sys.modules['cuequivariance_torch'] = types.ModuleType('cuequivariance_torch')
+                model = torch.load(f=model_file, map_location=torch_device)
+                # Clean up
+                del sys.modules['cuequivariance_torch']
+            else:
+                model = torch.load(f=model_file, map_location=torch_device)
             
             # Ensure model is in the right dtype
             if default_dtype == 'float64':
