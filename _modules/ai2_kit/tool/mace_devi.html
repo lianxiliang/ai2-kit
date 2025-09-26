@@ -437,6 +437,16 @@ document.write(`
                   
   <h1>Source code for ai2_kit.tool.mace_devi</h1><div class="highlight"><pre>
 <span></span><span class="kn">from</span><span class="w"> </span><span class="nn">ai2_kit.core.log</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_logger</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">get_logger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_is_cuequivariance_available</span><span class="p">():</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">cuequivariance_torch</span>
+        <span class="k">return</span> <span class="kc">True</span>
+    <span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span>
+
 <span class="kn">from</span><span class="w"> </span><span class="nn">ai2_kit.core.util</span><span class="w"> </span><span class="kn">import</span> <span class="n">ensure_dir</span>
 
 <span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">List</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">Any</span><span class="p">,</span> <span class="n">Union</span>
@@ -462,7 +472,8 @@ document.write(`
         <span class="n">type_map</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Union</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">,</span> <span class="nb">list</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
         <span class="n">device</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;cuda&#39;</span><span class="p">,</span>
         <span class="n">batch_size</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">64</span><span class="p">,</span>
-        <span class="n">default_dtype</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;float64&#39;</span>
+        <span class="n">default_dtype</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;float64&#39;</span><span class="p">,</span>
+        <span class="n">enable_cueq</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Calculate MACE model deviation from command line.</span>
@@ -474,21 +485,18 @@ document.write(`
 <span class="sd">        :param device: device for calculation (&#39;cuda&#39;, &#39;cpu&#39;, &#39;mps&#39;)</span>
 <span class="sd">        :param batch_size: batch size for processing</span>
 <span class="sd">        :param default_dtype: torch dtype (&#39;float32&#39;, &#39;float64&#39;)</span>
+<span class="sd">        :param enable_cueq: enable CuEq acceleration for faster inference</span>
 <span class="sd">        :return: path to output file</span>
 <span class="sd">        &quot;&quot;&quot;</span>
-        <span class="c1"># Try to use standalone mace-model-deviation package first</span>
+        <span class="c1"># Try standalone package first, fallback to built-in implementation</span>
         <span class="k">try</span><span class="p">:</span>
-            <span class="kn">import</span><span class="w"> </span><span class="nn">subprocess</span>
             <span class="kn">import</span><span class="w"> </span><span class="nn">shutil</span>
-            
-            <span class="c1"># Check if mace-model-devi command is available</span>
             <span class="k">if</span> <span class="n">shutil</span><span class="o">.</span><span class="n">which</span><span class="p">(</span><span class="s1">&#39;mace-model-devi&#39;</span><span class="p">):</span>
                 <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Using standalone mace-model-deviation package&quot;</span><span class="p">)</span>
-                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_use_standalone_package</span><span class="p">(</span><span class="n">models</span><span class="p">,</span> <span class="n">traj</span><span class="p">,</span> <span class="n">output</span><span class="p">,</span> <span class="n">type_map</span><span class="p">,</span> <span class="n">device</span><span class="p">,</span> <span class="n">batch_size</span><span class="p">,</span> <span class="n">default_dtype</span><span class="p">)</span>
+                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_use_standalone_package</span><span class="p">(</span><span class="n">models</span><span class="p">,</span> <span class="n">traj</span><span class="p">,</span> <span class="n">output</span><span class="p">,</span> <span class="n">type_map</span><span class="p">,</span> <span class="n">device</span><span class="p">,</span> <span class="n">batch_size</span><span class="p">,</span> <span class="n">default_dtype</span><span class="p">,</span> <span class="n">enable_cueq</span><span class="p">)</span>
         <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-            <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Standalone package not available, using built-in implementation: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Standalone package failed: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
         
-        <span class="c1"># Fallback to built-in implementation</span>
         <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Using built-in MACE model deviation implementation&quot;</span><span class="p">)</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_use_builtin_implementation</span><span class="p">(</span><span class="n">models</span><span class="p">,</span> <span class="n">traj</span><span class="p">,</span> <span class="n">output</span><span class="p">,</span> <span class="n">type_map</span><span class="p">,</span> <span class="n">device</span><span class="p">,</span> <span class="n">batch_size</span><span class="p">,</span> <span class="n">default_dtype</span><span class="p">)</span></div>
     
@@ -500,7 +508,8 @@ document.write(`
         <span class="n">type_map</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Union</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">,</span> <span class="nb">list</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
         <span class="n">device</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;cuda&#39;</span><span class="p">,</span>
         <span class="n">batch_size</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">64</span><span class="p">,</span>
-        <span class="n">default_dtype</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;float64&#39;</span>
+        <span class="n">default_dtype</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;float64&#39;</span><span class="p">,</span>
+        <span class="n">enable_cueq</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Use the standalone mace-model-deviation package via subprocess&quot;&quot;&quot;</span>
         <span class="kn">import</span><span class="w"> </span><span class="nn">subprocess</span>
@@ -526,6 +535,12 @@ document.write(`
                 <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Invalid type_map format: </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">type_map</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="n">cmd</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="s1">&#39;--type-map&#39;</span><span class="p">,</span> <span class="n">type_map_str</span><span class="p">])</span>
         
+        <span class="c1"># Add enable-cueq if requested</span>
+        <span class="k">if</span> <span class="n">enable_cueq</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">_is_cuequivariance_available</span><span class="p">():</span>
+                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;`enable_cueq` is requested but `cuequivariance_torch` is not installed.&quot;</span><span class="p">)</span>
+            <span class="n">cmd</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s1">&#39;--enable-cueq&#39;</span><span class="p">)</span>
+
         <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Running: </span><span class="si">{</span><span class="s1">&#39; &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">cmd</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
         
         <span class="c1"># Execute the standalone command</span>
@@ -572,18 +587,9 @@ document.write(`
         
         <span class="c1"># Call the main calculation function</span>
         <span class="n">result</span> <span class="o">=</span> <span class="n">calculate_mace_model_deviation</span><span class="p">(</span>
-            <span class="n">model_files</span><span class="o">=</span><span class="n">model_files</span><span class="p">,</span>
-            <span class="n">traj_file</span><span class="o">=</span><span class="n">traj</span><span class="p">,</span>
-            <span class="n">output_file</span><span class="o">=</span><span class="n">output</span><span class="p">,</span>
-            <span class="n">type_map</span><span class="o">=</span><span class="n">type_map_list</span><span class="p">,</span>
-            <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">,</span>
-            <span class="n">batch_size</span><span class="o">=</span><span class="n">batch_size</span><span class="p">,</span>
-            <span class="n">default_dtype</span><span class="o">=</span><span class="n">default_dtype</span>
+            <span class="n">model_files</span><span class="p">,</span> <span class="n">traj</span><span class="p">,</span> <span class="n">output</span><span class="p">,</span> <span class="n">type_map_list</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">default_dtype</span><span class="o">=</span><span class="n">default_dtype</span>
         <span class="p">)</span>
-        
-        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;MACE model deviation calculation completed: </span><span class="si">{</span><span class="n">result</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="k">return</span> <span class="n">result</span></div>
-
 
 <div class="viewcode-block" id="calculate_mace_model_deviation"><a class="viewcode-back" href="../../../_api/ai2_kit.tool.mace_devi.html#ai2_kit.tool.mace_devi.calculate_mace_model_deviation">[docs]</a><span class="k">def</span><span class="w"> </span><span class="nf">calculate_mace_model_deviation</span><span class="p">(</span>
     <span class="n">model_files</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
@@ -665,7 +671,7 @@ document.write(`
     <span class="c1"># write results</span>
     <span class="n">_write_deviation_results</span><span class="p">(</span><span class="n">frame_deviations</span><span class="p">,</span> <span class="n">output_file</span><span class="p">)</span>
     
-    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;model deviation calculation complete: </span><span class="si">{</span><span class="n">output_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;MACE model deviation calculation completed: </span><span class="si">{</span><span class="n">output_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
     <span class="k">return</span> <span class="n">output_file</span></div>
 
 
@@ -757,7 +763,18 @@ document.write(`
         <span class="n">models</span> <span class="o">=</span> <span class="p">[]</span>
         <span class="k">for</span> <span class="n">model_idx</span><span class="p">,</span> <span class="n">model_file</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">model_files</span><span class="p">):</span>
             <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;loading model </span><span class="si">{</span><span class="n">model_idx</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">model_files</span><span class="p">)</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">model_file</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-            <span class="n">model</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="o">=</span><span class="n">model_file</span><span class="p">,</span> <span class="n">map_location</span><span class="o">=</span><span class="n">torch_device</span><span class="p">)</span>
+            
+            <span class="c1"># Workaround for models trained with cuequivariance_torch on CPU</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">_is_cuequivariance_available</span><span class="p">()</span> <span class="ow">and</span> <span class="n">device</span> <span class="o">==</span> <span class="s1">&#39;cpu&#39;</span><span class="p">:</span>
+                <span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+                <span class="kn">import</span><span class="w"> </span><span class="nn">types</span>
+                <span class="c1"># Mock the module with a proper ModuleType</span>
+                <span class="n">sys</span><span class="o">.</span><span class="n">modules</span><span class="p">[</span><span class="s1">&#39;cuequivariance_torch&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">types</span><span class="o">.</span><span class="n">ModuleType</span><span class="p">(</span><span class="s1">&#39;cuequivariance_torch&#39;</span><span class="p">)</span>
+                <span class="n">model</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="o">=</span><span class="n">model_file</span><span class="p">,</span> <span class="n">map_location</span><span class="o">=</span><span class="n">torch_device</span><span class="p">)</span>
+                <span class="c1"># Clean up</span>
+                <span class="k">del</span> <span class="n">sys</span><span class="o">.</span><span class="n">modules</span><span class="p">[</span><span class="s1">&#39;cuequivariance_torch&#39;</span><span class="p">]</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">model</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="o">=</span><span class="n">model_file</span><span class="p">,</span> <span class="n">map_location</span><span class="o">=</span><span class="n">torch_device</span><span class="p">)</span>
             
             <span class="c1"># Ensure model is in the right dtype</span>
             <span class="k">if</span> <span class="n">default_dtype</span> <span class="o">==</span> <span class="s1">&#39;float64&#39;</span><span class="p">:</span>

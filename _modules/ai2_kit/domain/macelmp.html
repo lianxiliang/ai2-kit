@@ -515,30 +515,63 @@ document.write(`
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">model_devi_outputs</span></div></div>
 
 
-<span class="k">def</span><span class="w"> </span><span class="nf">_get_mace_models_variables</span><span class="p">(</span><span class="n">models</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Artifact</span><span class="p">]):</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">    Generate template variables for MACE models following DeepMD pattern</span>
-<span class="sd">    &quot;&quot;&quot;</span>
-    <span class="nb">vars</span> <span class="o">=</span> <span class="p">{}</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_select_best_mace_model</span><span class="p">(</span><span class="n">base_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">model_name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;mace_model&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Select best MACE models for LAMMPS (prefers .pt) and deviation (requires .model)&quot;&quot;&quot;</span>
     
-    <span class="k">if</span> <span class="n">models</span><span class="p">:</span>
-        <span class="c1"># Use the first LAMMPS-optimized model for simulation</span>
-        <span class="n">first_model</span> <span class="o">=</span> <span class="n">models</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">find_first_existing</span><span class="p">(</span><span class="n">candidates</span><span class="p">,</span> <span class="n">fallback</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">filename</span> <span class="ow">in</span> <span class="n">candidates</span><span class="p">:</span>
+            <span class="n">path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">base_dir</span><span class="p">,</span> <span class="n">filename</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">path</span><span class="p">):</span>
+                <span class="k">return</span> <span class="n">path</span>
+        <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">base_dir</span><span class="p">,</span> <span class="n">fallback</span><span class="p">)</span>
+    
+    <span class="c1"># LAMMPS: prefer compressed .pt files</span>
+    <span class="n">lammps_model</span> <span class="o">=</span> <span class="n">find_first_existing</span><span class="p">([</span>
+        <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">model_name</span><span class="si">}</span><span class="s2">_stagetwo.model-mliap_lammps.pt&quot;</span><span class="p">,</span>
+        <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">model_name</span><span class="si">}</span><span class="s2">.model-mliap_lammps.pt&quot;</span><span class="p">,</span> 
+        <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">model_name</span><span class="si">}</span><span class="s2">_stagetwo.model&quot;</span><span class="p">,</span>
+        <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">model_name</span><span class="si">}</span><span class="s2">.model&quot;</span>
+    <span class="p">],</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">model_name</span><span class="si">}</span><span class="s2">.model&quot;</span><span class="p">)</span>
+    
+    <span class="c1"># Deviation: only .model files (CLI requirement)</span>
+    <span class="n">deviation_model</span> <span class="o">=</span> <span class="n">find_first_existing</span><span class="p">([</span>
+        <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">model_name</span><span class="si">}</span><span class="s2">_stagetwo.model&quot;</span><span class="p">,</span>
+        <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">model_name</span><span class="si">}</span><span class="s2">.model&quot;</span>
+    <span class="p">],</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">model_name</span><span class="si">}</span><span class="s2">.model&quot;</span><span class="p">)</span>
+    
+    <span class="k">return</span> <span class="n">lammps_model</span><span class="p">,</span> <span class="n">deviation_model</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_get_mace_models_variables</span><span class="p">(</span><span class="n">models</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Artifact</span><span class="p">]):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Generate template variables for MACE models with intelligent file selection&quot;&quot;&quot;</span>
+    <span class="nb">vars</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">models</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nb">vars</span>
+    
+    <span class="n">lammps_models</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">deviation_models</span> <span class="o">=</span> <span class="p">[]</span>
+    
+    <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="n">models</span><span class="p">:</span>
+        <span class="n">model_path</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">url</span>
+        <span class="n">model_dir</span> <span class="o">=</span> <span class="n">model_path</span> <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isdir</span><span class="p">(</span><span class="n">model_path</span><span class="p">)</span> <span class="k">else</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">model_path</span><span class="p">)</span>
         
-        <span class="c1"># Get LAMMPS-compatible model path</span>
-        <span class="n">base_path</span> <span class="o">=</span> <span class="n">first_model</span><span class="o">.</span><span class="n">url</span>
-        <span class="k">if</span> <span class="s1">&#39;mliap_lammps.pt&#39;</span> <span class="ow">in</span> <span class="n">base_path</span><span class="p">:</span>
-            <span class="nb">vars</span><span class="p">[</span><span class="s1">&#39;MACE_LAMMPS_MODEL&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">base_path</span>
+        <span class="k">if</span> <span class="n">model_dir</span><span class="p">:</span>
+            <span class="n">lammps_model</span><span class="p">,</span> <span class="n">deviation_model</span> <span class="o">=</span> <span class="n">_select_best_mace_model</span><span class="p">(</span><span class="n">model_dir</span><span class="p">)</span>
+            <span class="n">lammps_models</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">lammps_model</span><span class="p">)</span>
+            <span class="n">deviation_models</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">deviation_model</span><span class="p">)</span>
         <span class="k">else</span><span class="p">:</span>
-            <span class="nb">vars</span><span class="p">[</span><span class="s1">&#39;MACE_LAMMPS_MODEL&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">base_path</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;.model&#39;</span><span class="p">,</span> <span class="s1">&#39;.model-mliap_lammps.pt&#39;</span><span class="p">)</span>
-        
-        <span class="c1"># Store all models for post-processing and model deviation</span>
-        <span class="n">model_paths</span> <span class="o">=</span> <span class="p">[</span><span class="n">m</span><span class="o">.</span><span class="n">url</span> <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="n">models</span><span class="p">]</span>
-        <span class="nb">vars</span><span class="p">[</span><span class="s1">&#39;MACE_MODELS&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39; &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">model_paths</span><span class="p">)</span>
-        
-        <span class="c1"># Individual model variables for flexibility</span>
-        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">m</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">models</span><span class="p">):</span>
-            <span class="nb">vars</span><span class="p">[</span><span class="sa">f</span><span class="s1">&#39;MACE_MODELS_</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">url</span>
+            <span class="c1"># Use file as-is if no directory</span>
+            <span class="n">lammps_models</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">model_path</span><span class="p">)</span>
+            <span class="n">deviation_models</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">model_path</span><span class="p">)</span>
+    
+    <span class="k">if</span> <span class="n">lammps_models</span><span class="p">:</span>
+        <span class="nb">vars</span><span class="p">[</span><span class="s1">&#39;MACE_LAMMPS_MODEL&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">lammps_models</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="nb">vars</span><span class="p">[</span><span class="s1">&#39;MACE_MODELS&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39; &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lammps_models</span><span class="p">)</span>
+    
+    <span class="k">if</span> <span class="n">deviation_models</span><span class="p">:</span>
+        <span class="nb">vars</span><span class="p">[</span><span class="s1">&#39;MACE_MODELS_FOR_DEVIATION&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39; &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">deviation_models</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">m</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">deviation_models</span><span class="p">):</span>
+            <span class="nb">vars</span><span class="p">[</span><span class="sa">f</span><span class="s1">&#39;MACE_MODELS_</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">m</span>
     
     <span class="k">return</span> <span class="nb">vars</span>
 
@@ -551,6 +584,10 @@ document.write(`
 <span class="sd">    MACE model deviation calculation in the SAME job submissions.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Starting MACE-LAMMPS exploration with </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="nb">input</span><span class="o">.</span><span class="n">mace_models</span><span class="p">)</span><span class="si">}</span><span class="s1"> models on device: </span><span class="si">{</span><span class="nb">input</span><span class="o">.</span><span class="n">device</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+    
+    <span class="c1"># Log the model files being used</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">model</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">input</span><span class="o">.</span><span class="n">mace_models</span><span class="p">):</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;MACE model </span><span class="si">{</span><span class="n">i</span><span class="o">+</span><span class="mi">1</span><span class="si">}</span><span class="s1">: </span><span class="si">{</span><span class="n">model</span><span class="o">.</span><span class="n">url</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
     
     <span class="c1"># We need to create our own bash steps instead of calling cll_lammps</span>
     <span class="c1"># because we need to modify the commands BEFORE job submission</span>
@@ -605,60 +642,51 @@ document.write(`
     <span class="c1"># Extract SLURM environment prefix from lammps_cmd for MACE model deviation</span>
     <span class="n">lammps_cmd_full</span> <span class="o">=</span> <span class="n">ctx</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">lammps_cmd</span>
     
-    <span class="c1"># Parse SLURM prefix (everything before the actual &#39;lmp&#39; command)</span>
-    <span class="c1"># Example: &quot;srun --environment=mace-lmp-plumed --container-workdir=$PWD --cpu-bind=socket --ntasks=1 --gres=gpu:1 lmp ...&quot;</span>
-    <span class="c1"># We want: &quot;srun --environment=mace-lmp-plumed --container-workdir=$PWD --cpu-bind=socket --ntasks=1 --gres=gpu:1&quot;</span>
+    <span class="c1"># Extract SLURM environment prefix for MACE model deviation</span>
     <span class="n">slurm_prefix</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
     <span class="k">if</span> <span class="s1">&#39;lmp&#39;</span> <span class="ow">in</span> <span class="n">lammps_cmd_full</span><span class="p">:</span>
-        <span class="c1"># Use regex to find &#39;lmp&#39; followed by space or arguments (actual lmp command, not part of other words)</span>
         <span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
-        <span class="n">lmp_match</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;\blmp\s+&#39;</span><span class="p">,</span> <span class="n">lammps_cmd_full</span><span class="p">)</span>
-        <span class="k">if</span> <span class="ow">not</span> <span class="n">lmp_match</span><span class="p">:</span>
-            <span class="c1"># Try to find &#39;lmp&#39; at end of string or followed by non-alphanumeric</span>
-            <span class="n">lmp_match</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;\blmp(?=\s|$|[^a-zA-Z0-9_-])&#39;</span><span class="p">,</span> <span class="n">lammps_cmd_full</span><span class="p">)</span>
-        
+        <span class="n">lmp_match</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;\blmp\s+&#39;</span><span class="p">,</span> <span class="n">lammps_cmd_full</span><span class="p">)</span> <span class="ow">or</span> <span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;\blmp(?=\s|$|[^a-zA-Z0-9_-])&#39;</span><span class="p">,</span> <span class="n">lammps_cmd_full</span><span class="p">)</span>
         <span class="k">if</span> <span class="n">lmp_match</span> <span class="ow">and</span> <span class="n">lmp_match</span><span class="o">.</span><span class="n">start</span><span class="p">()</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
-            <span class="c1"># Extract everything before &#39;lmp&#39; as the SLURM prefix</span>
             <span class="n">slurm_prefix</span> <span class="o">=</span> <span class="n">lammps_cmd_full</span><span class="p">[:</span><span class="n">lmp_match</span><span class="o">.</span><span class="n">start</span><span class="p">()]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
-            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Extracted SLURM prefix for MACE: </span><span class="si">{</span><span class="n">slurm_prefix</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
     
-    <span class="c1"># Prepare MACE model deviation command components  </span>
-    <span class="n">mace_models_str</span> <span class="o">=</span> <span class="s1">&#39; &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="n">m</span><span class="o">.</span><span class="n">url</span> <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="nb">input</span><span class="o">.</span><span class="n">mace_models</span><span class="p">])</span>
+    <span class="c1"># Build MACE model deviation command</span>
+    <span class="n">models_for_deviation</span> <span class="o">=</span> <span class="n">mace_template_vars</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;MACE_MODELS_FOR_DEVIATION&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)</span>
     <span class="n">type_map_str</span> <span class="o">=</span> <span class="s1">&#39;,&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">input</span><span class="o">.</span><span class="n">type_map</span><span class="p">)</span> <span class="k">if</span> <span class="nb">input</span><span class="o">.</span><span class="n">type_map</span> <span class="k">else</span> <span class="s1">&#39;&#39;</span>
     
-    <span class="c1"># Build MACE model deviation command using standalone package</span>
-    <span class="c1"># Use mace-model-devi command directly (cleaner than ai2-kit tool)</span>
     <span class="n">mace_cmd_args</span> <span class="o">=</span> <span class="p">[</span>
         <span class="s1">&#39;mace-model-devi&#39;</span><span class="p">,</span>
-        <span class="s1">&#39;--models&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;&quot;</span><span class="si">{</span><span class="n">mace_models_str</span><span class="si">}</span><span class="s1">&quot;&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;--models&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;&quot;</span><span class="si">{</span><span class="n">models_for_deviation</span><span class="si">}</span><span class="s1">&quot;&#39;</span><span class="p">,</span>
         <span class="s1">&#39;--traj&#39;</span><span class="p">,</span> <span class="s1">&#39;traj.lammpstrj&#39;</span><span class="p">,</span>
         <span class="s1">&#39;--output&#39;</span><span class="p">,</span> <span class="s1">&#39;model_devi.out&#39;</span><span class="p">,</span>
         <span class="s1">&#39;--device&#39;</span><span class="p">,</span> <span class="nb">input</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
     <span class="p">]</span>
+    
     <span class="k">if</span> <span class="n">type_map_str</span><span class="p">:</span>
         <span class="n">mace_cmd_args</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="s1">&#39;--type-map&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;&quot;</span><span class="si">{</span><span class="n">type_map_str</span><span class="si">}</span><span class="s1">&quot;&#39;</span><span class="p">])</span>
     
     <span class="n">base_mace_cmd</span> <span class="o">=</span> <span class="s1">&#39; &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">mace_cmd_args</span><span class="p">)</span>
-    
-    <span class="c1"># Apply SLURM prefix to MACE command if needed</span>
-    <span class="k">if</span> <span class="n">slurm_prefix</span><span class="p">:</span>
-        <span class="c1"># When using SLURM container, use standalone mace-model-deviation package directly</span>
-        <span class="c1"># No conda activation needed - package should be installed in container</span>
-        <span class="n">mace_cmd</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">slurm_prefix</span><span class="si">}</span><span class="s1"> </span><span class="si">{</span><span class="n">base_mace_cmd</span><span class="si">}</span><span class="s1">&#39;</span>
-    <span class="k">else</span><span class="p">:</span>
-        <span class="c1"># For non-SLURM environments, use standalone package directly</span>
-        <span class="n">mace_cmd</span> <span class="o">=</span> <span class="n">base_mace_cmd</span>
+    <span class="n">mace_cmd</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">slurm_prefix</span><span class="si">}</span><span class="s1"> </span><span class="si">{</span><span class="n">base_mace_cmd</span><span class="si">}</span><span class="s1">&#39;</span> <span class="k">if</span> <span class="n">slurm_prefix</span> <span class="k">else</span> <span class="n">base_mace_cmd</span>
     
     <span class="c1"># Create combined bash steps (LAMMPS + MACE model deviation in same job)</span>
     <span class="n">base_lammps_cmd</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">ctx</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">lammps_cmd</span><span class="si">}</span><span class="s1"> -i lammps.input&#39;</span>
     
     <span class="n">steps</span> <span class="o">=</span> <span class="p">[]</span>
     <span class="k">for</span> <span class="n">task_dir</span> <span class="ow">in</span> <span class="n">task_dirs</span><span class="p">:</span>
-        <span class="c1"># LAMMPS simulation command</span>
-        <span class="n">lammps_cmd</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;if [ -f md.restart.* ]; then </span><span class="si">{</span><span class="n">base_lammps_cmd</span><span class="si">}</span><span class="s1"> -v restart 1; else </span><span class="si">{</span><span class="n">base_lammps_cmd</span><span class="si">}</span><span class="s1"> -v restart 0; fi&#39;</span>
+        <span class="c1"># Multi-line bash script for better readability</span>
+        <span class="n">script_lines</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="s1">&#39;# Run LAMMPS simulation&#39;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s1">&#39;if [ -f md.restart.* ]; then&#39;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s1">&#39;    </span><span class="si">{</span><span class="n">base_lammps_cmd</span><span class="si">}</span><span class="s1"> -v restart 1&#39;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s1">&#39;else&#39;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s1">&#39;    </span><span class="si">{</span><span class="n">base_lammps_cmd</span><span class="si">}</span><span class="s1"> -v restart 0&#39;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s1">&#39;fi&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;# Calculate MACE model deviation&#39;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">mace_cmd</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">,</span>
+        <span class="p">]</span>
         
-        <span class="c1"># Combined command: LAMMPS followed by MACE model deviation</span>
-        <span class="n">combined_cmd</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">lammps_cmd</span><span class="si">}</span><span class="s1"> &amp;&amp; </span><span class="si">{</span><span class="n">mace_cmd</span><span class="si">}</span><span class="s1">&#39;</span>
+        <span class="n">combined_cmd</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">script_lines</span><span class="p">)</span>
         
         <span class="c1"># Single bash step that does both operations</span>
         <span class="n">steps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">BashStep</span><span class="p">(</span>
