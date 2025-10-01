@@ -651,21 +651,18 @@ document.write(`
             <span class="n">slurm_prefix</span> <span class="o">=</span> <span class="n">lammps_cmd_full</span><span class="p">[:</span><span class="n">lmp_match</span><span class="o">.</span><span class="n">start</span><span class="p">()]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
     
     <span class="c1"># Build MACE model deviation command</span>
+    <span class="c1"># Important: models_for_deviation is space-separated, must NOT be quoted to expand as multiple args</span>
     <span class="n">models_for_deviation</span> <span class="o">=</span> <span class="n">mace_template_vars</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;MACE_MODELS_FOR_DEVIATION&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)</span>
     <span class="n">type_map_str</span> <span class="o">=</span> <span class="s1">&#39;,&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">input</span><span class="o">.</span><span class="n">type_map</span><span class="p">)</span> <span class="k">if</span> <span class="nb">input</span><span class="o">.</span><span class="n">type_map</span> <span class="k">else</span> <span class="s1">&#39;&#39;</span>
     
-    <span class="n">mace_cmd_args</span> <span class="o">=</span> <span class="p">[</span>
-        <span class="s1">&#39;mace-model-devi&#39;</span><span class="p">,</span>
-        <span class="s1">&#39;--models&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;&quot;</span><span class="si">{</span><span class="n">models_for_deviation</span><span class="si">}</span><span class="s1">&quot;&#39;</span><span class="p">,</span>
-        <span class="s1">&#39;--traj&#39;</span><span class="p">,</span> <span class="s1">&#39;traj.lammpstrj&#39;</span><span class="p">,</span>
-        <span class="s1">&#39;--output&#39;</span><span class="p">,</span> <span class="s1">&#39;model_devi.out&#39;</span><span class="p">,</span>
-        <span class="s1">&#39;--device&#39;</span><span class="p">,</span> <span class="nb">input</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
-    <span class="p">]</span>
+    <span class="c1"># Build command without quoting the models list to allow proper expansion</span>
+    <span class="n">mace_cmd_parts</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;mace-model-devi&#39;</span><span class="p">,</span> <span class="s1">&#39;--models&#39;</span><span class="p">,</span> <span class="n">models_for_deviation</span><span class="p">]</span>
+    <span class="n">mace_cmd_parts</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="s1">&#39;--traj&#39;</span><span class="p">,</span> <span class="s1">&#39;traj.lammpstrj&#39;</span><span class="p">,</span> <span class="s1">&#39;--output&#39;</span><span class="p">,</span> <span class="s1">&#39;model_devi.out&#39;</span><span class="p">,</span> <span class="s1">&#39;--device&#39;</span><span class="p">,</span> <span class="nb">input</span><span class="o">.</span><span class="n">device</span><span class="p">])</span>
     
     <span class="k">if</span> <span class="n">type_map_str</span><span class="p">:</span>
-        <span class="n">mace_cmd_args</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="s1">&#39;--type-map&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;&quot;</span><span class="si">{</span><span class="n">type_map_str</span><span class="si">}</span><span class="s1">&quot;&#39;</span><span class="p">])</span>
+        <span class="n">mace_cmd_parts</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="s1">&#39;--type-map&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;&quot;</span><span class="si">{</span><span class="n">type_map_str</span><span class="si">}</span><span class="s1">&quot;&#39;</span><span class="p">])</span>
     
-    <span class="n">base_mace_cmd</span> <span class="o">=</span> <span class="s1">&#39; &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">mace_cmd_args</span><span class="p">)</span>
+    <span class="n">base_mace_cmd</span> <span class="o">=</span> <span class="s1">&#39; &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">mace_cmd_parts</span><span class="p">)</span>
     <span class="n">mace_cmd</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">slurm_prefix</span><span class="si">}</span><span class="s1"> </span><span class="si">{</span><span class="n">base_mace_cmd</span><span class="si">}</span><span class="s1">&#39;</span> <span class="k">if</span> <span class="n">slurm_prefix</span> <span class="k">else</span> <span class="n">base_mace_cmd</span>
     
     <span class="c1"># Create combined bash steps (LAMMPS + MACE model deviation in same job)</span>
