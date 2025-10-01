@@ -76,10 +76,9 @@ class MaceModelDeviTool:
         """Use the standalone mace-model-deviation package via subprocess"""
         import subprocess
         
-        # Build command for standalone package
-        cmd = [
-            'mace-model-devi',
-            '--models'] + models.strip().split() + [
+        # Build command for standalone package - models already space-separated
+        model_files = models.strip().split()
+        cmd = ['mace-model-devi', '--models'] + model_files + [
             '--traj', traj,
             '--output', output,
             '--device', device,

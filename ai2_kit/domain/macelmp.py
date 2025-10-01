@@ -213,21 +213,18 @@ async def cll_mace_lammps(input: CllMaceLammpsInput, ctx: CllMaceLammpsContext):
             slurm_prefix = lammps_cmd_full[:lmp_match.start()].strip()
     
     # Build MACE model deviation command
+    # Important: models_for_deviation is space-separated, must NOT be quoted to expand as multiple args
     models_for_deviation = mace_template_vars.get('MACE_MODELS_FOR_DEVIATION', '')
     type_map_str = ','.join(input.type_map) if input.type_map else ''
     
-    mace_cmd_args = [
-        'mace-model-devi',
-        '--models', f'"{models_for_deviation}"',
-        '--traj', 'traj.lammpstrj',
-        '--output', 'model_devi.out',
-        '--device', input.device,
-    ]
+    # Build command without quoting the models list to allow proper expansion
+    mace_cmd_parts = ['mace-model-devi', '--models', models_for_deviation]
+    mace_cmd_parts.extend(['--traj', 'traj.lammpstrj', '--output', 'model_devi.out', '--device', input.device])
     
     if type_map_str:
-        mace_cmd_args.extend(['--type-map', f'"{type_map_str}"'])
+        mace_cmd_parts.extend(['--type-map', f'"{type_map_str}"'])
     
-    base_mace_cmd = ' '.join(mace_cmd_args)
+    base_mace_cmd = ' '.join(mace_cmd_parts)
     mace_cmd = f'{slurm_prefix} {base_mace_cmd}' if slurm_prefix else base_mace_cmd
     
     # Create combined bash steps (LAMMPS + MACE model deviation in same job)
