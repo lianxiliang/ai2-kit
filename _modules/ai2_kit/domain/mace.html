@@ -631,11 +631,15 @@ document.write(`
     <span class="n">train_artifacts</span> <span class="o">=</span> <span class="p">[</span><span class="n">a</span> <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">all_datasets</span> <span class="k">if</span> <span class="n">a</span><span class="o">.</span><span class="n">url</span> <span class="ow">in</span> <span class="n">train_systems</span><span class="p">]</span>
 
     <span class="c1"># genertate cumulative dataset in the deepmd dataset dir, we basically keep the original deepmd dataset</span>
+    <span class="c1"># Use energy_key and forces_key from input template if available, otherwise use MACE defaults</span>
+    <span class="n">energy_key</span> <span class="o">=</span> <span class="nb">input</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">input_template</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;energy_key&#39;</span><span class="p">,</span> <span class="s1">&#39;energy&#39;</span><span class="p">)</span>
+    <span class="n">forces_key</span> <span class="o">=</span> <span class="nb">input</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">input_template</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;forces_key&#39;</span><span class="p">,</span> <span class="s1">&#39;forces&#39;</span><span class="p">)</span>
+    
     <span class="n">cumulative_train_file</span> <span class="o">=</span> <span class="n">executor</span><span class="o">.</span><span class="n">run_python_fn</span><span class="p">(</span><span class="n">make_mace_cumulative_dataset</span><span class="p">)(</span>
         <span class="n">dataset_dir</span><span class="o">=</span><span class="n">new_dataset_dir</span><span class="p">,</span> 
         <span class="n">dataset_collection</span><span class="o">=</span><span class="p">[</span><span class="n">a</span><span class="o">.</span><span class="n">to_dict</span><span class="p">()</span> <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">train_artifacts</span><span class="p">],</span> 
         <span class="n">type_map</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">type_map</span><span class="p">,</span> 
-        <span class="n">extxyzkey</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;ref_energy&#39;</span><span class="p">,</span> <span class="s1">&#39;ref_forces&#39;</span><span class="p">],</span>
+        <span class="n">extxyzkey</span><span class="o">=</span><span class="p">[</span><span class="n">energy_key</span><span class="p">,</span> <span class="n">forces_key</span><span class="p">],</span>
     <span class="p">)</span>
 
     <span class="c1"># make task dirs</span>
