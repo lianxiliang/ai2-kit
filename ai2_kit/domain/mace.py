@@ -193,11 +193,15 @@ async def cll_mace(input: CllMaceInput, ctx: CllMaceContext):
     train_artifacts = [a for a in all_datasets if a.url in train_systems]
 
     # genertate cumulative dataset in the deepmd dataset dir, we basically keep the original deepmd dataset
+    # Use energy_key and forces_key from input template if available, otherwise use MACE defaults
+    energy_key = input.config.input_template.get('energy_key', 'energy')
+    forces_key = input.config.input_template.get('forces_key', 'forces')
+    
     cumulative_train_file = executor.run_python_fn(make_mace_cumulative_dataset)(
         dataset_dir=new_dataset_dir, 
         dataset_collection=[a.to_dict() for a in train_artifacts], 
         type_map=input.type_map, 
-        extxyzkey = ['ref_energy', 'ref_forces'],
+        extxyzkey=[energy_key, forces_key],
     )
 
     # make task dirs

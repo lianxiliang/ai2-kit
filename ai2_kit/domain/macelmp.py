@@ -217,7 +217,7 @@ async def cll_mace_lammps(input: CllMaceLammpsInput, ctx: CllMaceLammpsContext):
     models_for_deviation = mace_template_vars.get('MACE_MODELS_FOR_DEVIATION', '')
     type_map_str = ','.join(input.type_map) if input.type_map else ''
     
-    # Build command without quoting the models list to allow proper expansion
+    # Build MACE model deviation command (CLI only)
     mace_cmd_parts = ['mace-model-devi', '--models', models_for_deviation]
     mace_cmd_parts.extend(['--traj', 'traj.lammpstrj', '--output', 'model_devi.out', '--device', input.device])
     
