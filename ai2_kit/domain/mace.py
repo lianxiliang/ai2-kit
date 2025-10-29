@@ -338,30 +338,20 @@ def _build_mace_steps(mace_cmd: str,
     # Build training command
     mace_train_cmd = f'{mace_cmd} --config {MACE_INPUT_FILE} {mace_train_opts}'
 
-    # MACE restart logic: check for checkpoint files and restart accordingly
-    if previous_model:
-        mace_train_cmd = f'{mace_train_cmd} --restart-training {previous_model}'
+    # Optional: Use pretrained foundation model for transfer learning
     if pretrained_model:
         mace_train_cmd = f'{mace_train_cmd} --foundation-model {pretrained_model}'
     
-    # MACE checkpoint restart logic
-    mace_train_cmd_restart = f'if [ ! -f {model_name}.model ]; then {mace_train_cmd}; else echo "Model already trained, skipping..."; fi'
-
     steps.append(
-        BashStep(cmd=mace_train_cmd_restart, cwd=cwd, checkpoint='mace-train')  # type: ignore
+        BashStep(cmd=mace_train_cmd, cwd=cwd, checkpoint='mace-train')  # type: ignore
     )
 
     if compress_model:
         # Intelligent model selection for LAMMPS compression
-        model_selection = f'''
-if [ -f "{model_name}_stagetwo.model" ]; then
-    SOURCE_MODEL="{model_name}_stagetwo.model"
-else
-    SOURCE_MODEL="{model_name}.model"
-fi
-'''
+        model_selection = f'if [ -f "{model_name}_stagetwo.model" ]; then SOURCE_MODEL="{model_name}_stagetwo.model"; else SOURCE_MODEL="{model_name}.model"; fi'
         compress_base = 'mace_create_lammps_model'
-        compress_cmd = f'{model_selection}\n{env_prefix + " " if env_prefix else ""}{compress_base} $SOURCE_MODEL --format=mliap'
+        # Specify --head Default to avoid interactive prompt in batch jobs
+        compress_cmd = f'{model_selection} && {env_prefix + " " if env_prefix else ""}{compress_base} $SOURCE_MODEL --format=mliap --head Default'
         
         steps.append(BashStep(cmd=compress_cmd, cwd=cwd))
     return steps
@@ -452,6 +442,13 @@ def make_mace_input(input_template: dict,
     mace_input['seed'] = _random_seed()
     mace_input['train_file'] = train_file
     mace_input['name'] = "mace_model"
+    
+    # Safety check: ensure restart_latest is set to True for automatic checkpoint recovery
+    # MACE natively supports resuming from checkpoints when restart_latest=True
+    # Combined with ai2-kit's auto-resubmission (max_tries=2), this enables robust training
+    if 'restart_latest' not in mace_input:
+        mace_input['restart_latest'] = True
+        logger.info('Added restart_latest: True to MACE config for automatic checkpoint recovery')
     
     return mace_input
 
