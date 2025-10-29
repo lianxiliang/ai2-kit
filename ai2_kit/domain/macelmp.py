@@ -2,7 +2,7 @@ from ai2_kit.core.artifact import Artifact, ArtifactDict
 from ai2_kit.core.log import get_logger
 from ai2_kit.core.script import BashStep, BashScript, make_gpu_parallel_steps
 from ai2_kit.core.job import gather_jobs
-from ai2_kit.core.util import list_split
+from ai2_kit.core.util import list_split, flatten
 
 from typing import List, Optional, Mapping
 from dataclasses import dataclass
@@ -13,9 +13,6 @@ from .data import DataFormat
 from .lammps import (
     CllLammpsInputConfig, 
     CllLammpsContextConfig,
-    CllLammpsInput,
-    CllLammpsContext,
-    cll_lammps,  # Import back for reuse
 )
 
 logger = get_logger(__name__)
@@ -36,30 +33,6 @@ class CllMaceLammpsInput:
     mode: TRAINING_MODE = 'default'
     new_system_files: Optional[List[Artifact]] = None
     device: str = 'cuda'  # Device for MACE model deviation calculation
-    @classmethod
-    def from_mace_template(cls, config: CllMaceLammpsInputConfig, 
-                          mace_models: List[Artifact], 
-                          type_map: List[str], 
-                          mass_map: List[float],
-                          input_template: dict,
-                          **kwargs) -> 'CllMaceLammpsInput':
-        """
-        Create CllMaceLammpsInput with device extracted from MACE input template
-        
-        Args:
-            input_template: MACE configuration template containing device setting
-            **kwargs: Other parameters
-        """
-        device = input_template.get('device', 'cuda')  # Extract device from template
-        
-        return cls(
-            config=config,
-            mace_models=mace_models,
-            type_map=type_map,
-            mass_map=mass_map,
-            device=device,
-            **kwargs
-        )
 
 
 @dataclass
@@ -203,8 +176,6 @@ async def cll_mace_lammps(input: CllMaceLammpsInput, ctx: CllMaceLammpsContext):
     
     # Extract SLURM environment prefix from lammps_cmd for MACE model deviation
     lammps_cmd_full = ctx.config.lammps_cmd
-    
-    # Extract SLURM environment prefix for MACE model deviation
     slurm_prefix = ""
     if 'lmp' in lammps_cmd_full:
         import re
@@ -228,36 +199,34 @@ async def cll_mace_lammps(input: CllMaceLammpsInput, ctx: CllMaceLammpsContext):
     mace_cmd = f'{slurm_prefix} {base_mace_cmd}' if slurm_prefix else base_mace_cmd
     
     # Create combined bash steps (LAMMPS + MACE model deviation in same job)
+    # Use multiple BashSteps with same cwd for cleaner script organization
     base_lammps_cmd = f'{ctx.config.lammps_cmd} -i lammps.input'
     
-    steps = []
+    all_steps = []
     for task_dir in task_dirs:
-        # Multi-line bash script for better readability
-        script_lines = [
-            '# Run LAMMPS simulation',
-            f'if [ -f md.restart.* ]; then',
-            f'    {base_lammps_cmd} -v restart 1',
-            f'else',
-            f'    {base_lammps_cmd} -v restart 0',
-            f'fi',
-            '',
-            '# Calculate MACE model deviation',
-            f'{mace_cmd}',
-        ]
+        task_steps = []
         
-        combined_cmd = '\n'.join(script_lines)
-        
-        # Single bash step that does both operations
-        steps.append(BashStep(
+        # Step 1: Run LAMMPS simulation with restart logic
+        lammps_cmd = f'''if [ -f md.restart.* ]; then {base_lammps_cmd} -v restart 1; else {base_lammps_cmd} -v restart 0; fi'''
+        task_steps.append(BashStep(
             cwd=task_dir['url'],
-            cmd=combined_cmd,
-            checkpoint='mace-lammps-combined',
+            cmd=lammps_cmd,
+            checkpoint='mace-lammps',
             exit_on_error=not input.config.ignore_error
         ))
+        
+        # Step 2: Calculate MACE model deviation (same cwd, no checkpoint for second step)
+        task_steps.append(BashStep(
+            cwd=task_dir['url'],
+            cmd=mace_cmd,
+            exit_on_error=not input.config.ignore_error
+        ))
+        
+        all_steps.append(task_steps)
     
     # Submit jobs with the combined steps (same as cll_lammps)
     jobs = []
-    for i, steps_group in enumerate(list_split(steps, ctx.config.concurrency)):
+    for i, steps_group in enumerate(list_split(all_steps, ctx.config.concurrency)):
         if not steps_group:
             continue
             
@@ -269,7 +238,7 @@ async def cll_mace_lammps(input: CllMaceLammpsInput, ctx: CllMaceLammpsContext):
         else:
             script = BashScript(
                 template=ctx.config.script_template,
-                steps=steps_group,
+                steps=flatten(steps_group),  # type: ignore
             )
             
         job = executor.submit(script.render(), cwd=tasks_dir)
