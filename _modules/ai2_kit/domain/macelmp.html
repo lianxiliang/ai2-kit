@@ -440,7 +440,7 @@ document.write(`
 <span class="kn">from</span><span class="w"> </span><span class="nn">ai2_kit.core.log</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_logger</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">ai2_kit.core.script</span><span class="w"> </span><span class="kn">import</span> <span class="n">BashStep</span><span class="p">,</span> <span class="n">BashScript</span><span class="p">,</span> <span class="n">make_gpu_parallel_steps</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">ai2_kit.core.job</span><span class="w"> </span><span class="kn">import</span> <span class="n">gather_jobs</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">ai2_kit.core.util</span><span class="w"> </span><span class="kn">import</span> <span class="n">list_split</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">ai2_kit.core.util</span><span class="w"> </span><span class="kn">import</span> <span class="n">list_split</span><span class="p">,</span> <span class="n">flatten</span>
 
 <span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">List</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Mapping</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">dataclasses</span><span class="w"> </span><span class="kn">import</span> <span class="n">dataclass</span>
@@ -451,9 +451,6 @@ document.write(`
 <span class="kn">from</span><span class="w"> </span><span class="nn">.lammps</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
     <span class="n">CllLammpsInputConfig</span><span class="p">,</span> 
     <span class="n">CllLammpsContextConfig</span><span class="p">,</span>
-    <span class="n">CllLammpsInput</span><span class="p">,</span>
-    <span class="n">CllLammpsContext</span><span class="p">,</span>
-    <span class="n">cll_lammps</span><span class="p">,</span>  <span class="c1"># Import back for reuse</span>
 <span class="p">)</span>
 
 <span class="n">logger</span> <span class="o">=</span> <span class="n">get_logger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
@@ -473,31 +470,7 @@ document.write(`
     <span class="n">mass_map</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span>
     <span class="n">mode</span><span class="p">:</span> <span class="n">TRAINING_MODE</span> <span class="o">=</span> <span class="s1">&#39;default&#39;</span>
     <span class="n">new_system_files</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="n">Artifact</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span>
-    <span class="n">device</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;cuda&#39;</span>  <span class="c1"># Device for MACE model deviation calculation</span>
-<div class="viewcode-block" id="CllMaceLammpsInput.from_mace_template"><a class="viewcode-back" href="../../../_api/ai2_kit.domain.macelmp.html#ai2_kit.domain.macelmp.CllMaceLammpsInput.from_mace_template">[docs]</a>    <span class="nd">@classmethod</span>
-    <span class="k">def</span><span class="w"> </span><span class="nf">from_mace_template</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">config</span><span class="p">:</span> <span class="n">CllMaceLammpsInputConfig</span><span class="p">,</span> 
-                          <span class="n">mace_models</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Artifact</span><span class="p">],</span> 
-                          <span class="n">type_map</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> 
-                          <span class="n">mass_map</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">float</span><span class="p">],</span>
-                          <span class="n">input_template</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span>
-                          <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s1">&#39;CllMaceLammpsInput&#39;</span><span class="p">:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">        Create CllMaceLammpsInput with device extracted from MACE input template</span>
-<span class="sd">        </span>
-<span class="sd">        Args:</span>
-<span class="sd">            input_template: MACE configuration template containing device setting</span>
-<span class="sd">            **kwargs: Other parameters</span>
-<span class="sd">        &quot;&quot;&quot;</span>
-        <span class="n">device</span> <span class="o">=</span> <span class="n">input_template</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;device&#39;</span><span class="p">,</span> <span class="s1">&#39;cuda&#39;</span><span class="p">)</span>  <span class="c1"># Extract device from template</span>
-        
-        <span class="k">return</span> <span class="bp">cls</span><span class="p">(</span>
-            <span class="n">config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span>
-            <span class="n">mace_models</span><span class="o">=</span><span class="n">mace_models</span><span class="p">,</span>
-            <span class="n">type_map</span><span class="o">=</span><span class="n">type_map</span><span class="p">,</span>
-            <span class="n">mass_map</span><span class="o">=</span><span class="n">mass_map</span><span class="p">,</span>
-            <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">,</span>
-            <span class="o">**</span><span class="n">kwargs</span>
-        <span class="p">)</span></div></div>
+    <span class="n">device</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;cuda&#39;</span>  <span class="c1"># Device for MACE model deviation calculation</span></div>
 
 
 <div class="viewcode-block" id="CllMaceLammpsContext"><a class="viewcode-back" href="../../../_api/ai2_kit.domain.macelmp.html#ai2_kit.domain.macelmp.CllMaceLammpsContext">[docs]</a><span class="nd">@dataclass</span>
@@ -641,8 +614,6 @@ document.write(`
     
     <span class="c1"># Extract SLURM environment prefix from lammps_cmd for MACE model deviation</span>
     <span class="n">lammps_cmd_full</span> <span class="o">=</span> <span class="n">ctx</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">lammps_cmd</span>
-    
-    <span class="c1"># Extract SLURM environment prefix for MACE model deviation</span>
     <span class="n">slurm_prefix</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
     <span class="k">if</span> <span class="s1">&#39;lmp&#39;</span> <span class="ow">in</span> <span class="n">lammps_cmd_full</span><span class="p">:</span>
         <span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
@@ -666,36 +637,34 @@ document.write(`
     <span class="n">mace_cmd</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">slurm_prefix</span><span class="si">}</span><span class="s1"> </span><span class="si">{</span><span class="n">base_mace_cmd</span><span class="si">}</span><span class="s1">&#39;</span> <span class="k">if</span> <span class="n">slurm_prefix</span> <span class="k">else</span> <span class="n">base_mace_cmd</span>
     
     <span class="c1"># Create combined bash steps (LAMMPS + MACE model deviation in same job)</span>
+    <span class="c1"># Use multiple BashSteps with same cwd for cleaner script organization</span>
     <span class="n">base_lammps_cmd</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">ctx</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">lammps_cmd</span><span class="si">}</span><span class="s1"> -i lammps.input&#39;</span>
     
-    <span class="n">steps</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">all_steps</span> <span class="o">=</span> <span class="p">[]</span>
     <span class="k">for</span> <span class="n">task_dir</span> <span class="ow">in</span> <span class="n">task_dirs</span><span class="p">:</span>
-        <span class="c1"># Multi-line bash script for better readability</span>
-        <span class="n">script_lines</span> <span class="o">=</span> <span class="p">[</span>
-            <span class="s1">&#39;# Run LAMMPS simulation&#39;</span><span class="p">,</span>
-            <span class="sa">f</span><span class="s1">&#39;if [ -f md.restart.* ]; then&#39;</span><span class="p">,</span>
-            <span class="sa">f</span><span class="s1">&#39;    </span><span class="si">{</span><span class="n">base_lammps_cmd</span><span class="si">}</span><span class="s1"> -v restart 1&#39;</span><span class="p">,</span>
-            <span class="sa">f</span><span class="s1">&#39;else&#39;</span><span class="p">,</span>
-            <span class="sa">f</span><span class="s1">&#39;    </span><span class="si">{</span><span class="n">base_lammps_cmd</span><span class="si">}</span><span class="s1"> -v restart 0&#39;</span><span class="p">,</span>
-            <span class="sa">f</span><span class="s1">&#39;fi&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;# Calculate MACE model deviation&#39;</span><span class="p">,</span>
-            <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">mace_cmd</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">,</span>
-        <span class="p">]</span>
+        <span class="n">task_steps</span> <span class="o">=</span> <span class="p">[]</span>
         
-        <span class="n">combined_cmd</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">script_lines</span><span class="p">)</span>
-        
-        <span class="c1"># Single bash step that does both operations</span>
-        <span class="n">steps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">BashStep</span><span class="p">(</span>
+        <span class="c1"># Step 1: Run LAMMPS simulation with restart logic</span>
+        <span class="n">lammps_cmd</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;&#39;&#39;if [ -f md.restart.* ]; then </span><span class="si">{</span><span class="n">base_lammps_cmd</span><span class="si">}</span><span class="s1"> -v restart 1; else </span><span class="si">{</span><span class="n">base_lammps_cmd</span><span class="si">}</span><span class="s1"> -v restart 0; fi&#39;&#39;&#39;</span>
+        <span class="n">task_steps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">BashStep</span><span class="p">(</span>
             <span class="n">cwd</span><span class="o">=</span><span class="n">task_dir</span><span class="p">[</span><span class="s1">&#39;url&#39;</span><span class="p">],</span>
-            <span class="n">cmd</span><span class="o">=</span><span class="n">combined_cmd</span><span class="p">,</span>
-            <span class="n">checkpoint</span><span class="o">=</span><span class="s1">&#39;mace-lammps-combined&#39;</span><span class="p">,</span>
+            <span class="n">cmd</span><span class="o">=</span><span class="n">lammps_cmd</span><span class="p">,</span>
+            <span class="n">checkpoint</span><span class="o">=</span><span class="s1">&#39;mace-lammps&#39;</span><span class="p">,</span>
             <span class="n">exit_on_error</span><span class="o">=</span><span class="ow">not</span> <span class="nb">input</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">ignore_error</span>
         <span class="p">))</span>
+        
+        <span class="c1"># Step 2: Calculate MACE model deviation (same cwd, no checkpoint for second step)</span>
+        <span class="n">task_steps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">BashStep</span><span class="p">(</span>
+            <span class="n">cwd</span><span class="o">=</span><span class="n">task_dir</span><span class="p">[</span><span class="s1">&#39;url&#39;</span><span class="p">],</span>
+            <span class="n">cmd</span><span class="o">=</span><span class="n">mace_cmd</span><span class="p">,</span>
+            <span class="n">exit_on_error</span><span class="o">=</span><span class="ow">not</span> <span class="nb">input</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">ignore_error</span>
+        <span class="p">))</span>
+        
+        <span class="n">all_steps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">task_steps</span><span class="p">)</span>
     
     <span class="c1"># Submit jobs with the combined steps (same as cll_lammps)</span>
     <span class="n">jobs</span> <span class="o">=</span> <span class="p">[]</span>
-    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">steps_group</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">list_split</span><span class="p">(</span><span class="n">steps</span><span class="p">,</span> <span class="n">ctx</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">concurrency</span><span class="p">)):</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">steps_group</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">list_split</span><span class="p">(</span><span class="n">all_steps</span><span class="p">,</span> <span class="n">ctx</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">concurrency</span><span class="p">)):</span>
         <span class="k">if</span> <span class="ow">not</span> <span class="n">steps_group</span><span class="p">:</span>
             <span class="k">continue</span>
             
@@ -707,7 +676,7 @@ document.write(`
         <span class="k">else</span><span class="p">:</span>
             <span class="n">script</span> <span class="o">=</span> <span class="n">BashScript</span><span class="p">(</span>
                 <span class="n">template</span><span class="o">=</span><span class="n">ctx</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">script_template</span><span class="p">,</span>
-                <span class="n">steps</span><span class="o">=</span><span class="n">steps_group</span><span class="p">,</span>
+                <span class="n">steps</span><span class="o">=</span><span class="n">flatten</span><span class="p">(</span><span class="n">steps_group</span><span class="p">),</span>  <span class="c1"># type: ignore</span>
             <span class="p">)</span>
             
         <span class="n">job</span> <span class="o">=</span> <span class="n">executor</span><span class="o">.</span><span class="n">submit</span><span class="p">(</span><span class="n">script</span><span class="o">.</span><span class="n">render</span><span class="p">(),</span> <span class="n">cwd</span><span class="o">=</span><span class="n">tasks_dir</span><span class="p">)</span>
