@@ -106,6 +106,13 @@ class CllMaceInputConfig(BaseModel):
     Extra options for mace train command
     """
 
+    shuffle_dataset: bool = False
+    """
+    If enabled, each model will be trained on a differently shuffled version of the dataset.
+    This creates different training orders, which can increase ensemble diversity.
+    Different random shuffles are generated using the model index as seed.
+    """
+
 
 class CllMaceContextConfig(BaseModel):
     script_template: BashTemplate
@@ -194,15 +201,31 @@ async def cll_mace(input: CllMaceInput, ctx: CllMaceContext):
 
     # genertate cumulative dataset in the deepmd dataset dir, we basically keep the original deepmd dataset
     # Use energy_key and forces_key from input template if available, otherwise use MACE defaults
-    energy_key = input.config.input_template.get('energy_key', 'energy')
-    forces_key = input.config.input_template.get('forces_key', 'forces')
+    energy_key = input.config.input_template.get('energy_key', 'ref_energy')
+    forces_key = input.config.input_template.get('forces_key', 'ref_forces')
     
-    cumulative_train_file = executor.run_python_fn(make_mace_cumulative_dataset)(
-        dataset_dir=new_dataset_dir, 
-        dataset_collection=[a.to_dict() for a in train_artifacts], 
-        type_map=input.type_map, 
-        extxyzkey=[energy_key, forces_key],
-    )
+    # If shuffling is enabled, create shuffled versions for each model
+    # Otherwise, create a single base cumulative file used by all models
+    if input.config.shuffle_dataset:
+        # Create shuffled datasets for each model
+        for model_idx in range(input.config.model_num):
+            executor.run_python_fn(make_mace_cumulative_dataset)(
+                dataset_dir=new_dataset_dir,
+                dataset_collection=[a.to_dict() for a in train_artifacts],
+                type_map=input.type_map,
+                extxyzkey=[energy_key, forces_key],
+                shuffle_seed=model_idx,
+            )
+        # Set base filename for task dirs to construct shuffled names from
+        cumulative_train_file = os.path.join(new_dataset_dir, 'train.xyz')
+    else:
+        # Create single unshuffled file used by all models (original behavior)
+        cumulative_train_file = executor.run_python_fn(make_mace_cumulative_dataset)(
+            dataset_dir=new_dataset_dir, 
+            dataset_collection=[a.to_dict() for a in train_artifacts], 
+            type_map=input.type_map, 
+            extxyzkey=[energy_key, forces_key],
+        )
 
     # make task dirs
     mace_task_dirs = executor.run_python_fn(make_mace_task_dirs)(
@@ -213,6 +236,7 @@ async def cll_mace(input: CllMaceInput, ctx: CllMaceContext):
         base_dir=tasks_dir,
         cumulative_train_file=cumulative_train_file,
         input_modifier_fn=input.config.input_modifier_fn,
+        shuffle_dataset=input.config.shuffle_dataset,
     )
 
 
@@ -364,18 +388,27 @@ def make_mace_task_dirs(input_template: dict,
                           base_dir: str,
                           cumulative_train_file: str,
                           input_modifier_fn: Optional[str],
+                          shuffle_dataset: bool = False,
                           ):
 
     input_modifier = create_fn(input_modifier_fn, 'input_modifier_fn') if input_modifier_fn else lambda x: x
 
     mace_task_dirs = [os.path.join(base_dir, f'{i:03d}')  for i in range(model_num)]
-    for task_dir in mace_task_dirs:
+    for i, task_dir in enumerate(mace_task_dirs):
         os.makedirs(task_dir, exist_ok=True)
+        
+        # If shuffle_dataset is enabled, use the model index as seed to determine train file
+        # Otherwise, all models share the same train file
+        if shuffle_dataset:
+            train_file = cumulative_train_file.replace('.xyz', f'_shuffled_{i}.xyz')
+        else:
+            train_file = cumulative_train_file
+        
         mace_input = make_mace_input(
             input_template=input_template,
             type_map=type_map,
             isolate_outliers=isolate_outliers,
-            train_file=cumulative_train_file,
+            train_file=train_file,
         )
 
         mace_input = input_modifier(mace_input)
@@ -458,12 +491,18 @@ def make_mace_cumulative_dataset(
         dataset_collection: List[ArtifactDict],
         type_map: List[str],
         extxyzkey: List[str] = ['ref_energy', 'ref_forces'],
+        shuffle_seed: Optional[int] = None,
 ):
     """create mace cumulative dataset since this is mace specific"""
     os.makedirs(dataset_dir, exist_ok=True)
-    train_file = os.path.join(dataset_dir, 'train.xyz')
+    
+    # If shuffle_seed is provided, create a shuffled version with the seed in the filename
+    if shuffle_seed is not None:
+        train_file = os.path.join(dataset_dir, f'train_shuffled_{shuffle_seed}.xyz')
+    else:
+        train_file = os.path.join(dataset_dir, 'train.xyz')
 
     # define a function to write the cumulative file in data.py
-    write_mace_cumulative_dataset(train_file, dataset_collection, type_map, extxyzkey)
-    logger.info(f'Created cumulative dataset: {train_file}')
+    write_mace_cumulative_dataset(train_file, dataset_collection, type_map, extxyzkey, shuffle_seed=shuffle_seed)
+    logger.info(f'Created cumulative dataset: {train_file}' + (f' (shuffled with seed {shuffle_seed})' if shuffle_seed is not None else ''))
     return train_file

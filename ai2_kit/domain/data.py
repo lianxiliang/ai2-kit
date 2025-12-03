@@ -112,7 +112,8 @@ def write_mace_cumulative_dataset(
         type_map: List[str],
         extxyzkey: List[str] = ['energy', 'forces'],
         max_structures: Optional[int] = None,
-        sample_method: str = 'sequential'
+        sample_method: str = 'sequential',
+        shuffle_seed: Optional[int] = None
 ):
     """
     Write multiple datasets from artifact collection to a MACE-compatible extxyz file.
@@ -128,6 +129,9 @@ def write_mace_cumulative_dataset(
     :param max_structures: Maximum number of structures to write, None means all
     :param sample_method: Method for sampling structures if max_structures is set:
                          'sequential' (default), 'random', 'even'
+    :param shuffle_seed: Optional seed for shuffling the dataset order. Different seeds create
+                         different training orders, which can increase ensemble diversity.
+                         If None, no shuffling is performed.
     """
     from ai2_kit.tool.dpdata import read, deepmd2ase
     from ai2_kit.core.log import get_logger
@@ -153,6 +157,12 @@ def write_mace_cumulative_dataset(
             all_atoms.extend(atoms_list)
     except Exception as e:
         logger.error(f"Error processing datasets: {e}")
+    
+    # Shuffle dataset if seed is provided (for ensemble diversity)
+    if shuffle_seed is not None:
+        random.seed(shuffle_seed)
+        random.shuffle(all_atoms)
+        logger.info(f"Shuffled {len(all_atoms)} structures with seed {shuffle_seed}")
     
     # Sample structures if requested
     if max_structures is not None and max_structures < len(all_atoms):
