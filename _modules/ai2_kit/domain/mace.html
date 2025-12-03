@@ -542,6 +542,13 @@ document.write(`
     <span class="n">mace_train_opts</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Extra options for mace train command</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">shuffle_dataset</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    If enabled, each model will be trained on a differently shuffled version of the dataset.</span>
+<span class="sd">    This creates different training orders, which can increase ensemble diversity.</span>
+<span class="sd">    Different random shuffles are generated using the model index as seed.</span>
 <span class="sd">    &quot;&quot;&quot;</span></div>
 
 
@@ -632,15 +639,31 @@ document.write(`
 
     <span class="c1"># genertate cumulative dataset in the deepmd dataset dir, we basically keep the original deepmd dataset</span>
     <span class="c1"># Use energy_key and forces_key from input template if available, otherwise use MACE defaults</span>
-    <span class="n">energy_key</span> <span class="o">=</span> <span class="nb">input</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">input_template</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;energy_key&#39;</span><span class="p">,</span> <span class="s1">&#39;energy&#39;</span><span class="p">)</span>
-    <span class="n">forces_key</span> <span class="o">=</span> <span class="nb">input</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">input_template</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;forces_key&#39;</span><span class="p">,</span> <span class="s1">&#39;forces&#39;</span><span class="p">)</span>
+    <span class="n">energy_key</span> <span class="o">=</span> <span class="nb">input</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">input_template</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;energy_key&#39;</span><span class="p">,</span> <span class="s1">&#39;ref_energy&#39;</span><span class="p">)</span>
+    <span class="n">forces_key</span> <span class="o">=</span> <span class="nb">input</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">input_template</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;forces_key&#39;</span><span class="p">,</span> <span class="s1">&#39;ref_forces&#39;</span><span class="p">)</span>
     
-    <span class="n">cumulative_train_file</span> <span class="o">=</span> <span class="n">executor</span><span class="o">.</span><span class="n">run_python_fn</span><span class="p">(</span><span class="n">make_mace_cumulative_dataset</span><span class="p">)(</span>
-        <span class="n">dataset_dir</span><span class="o">=</span><span class="n">new_dataset_dir</span><span class="p">,</span> 
-        <span class="n">dataset_collection</span><span class="o">=</span><span class="p">[</span><span class="n">a</span><span class="o">.</span><span class="n">to_dict</span><span class="p">()</span> <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">train_artifacts</span><span class="p">],</span> 
-        <span class="n">type_map</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">type_map</span><span class="p">,</span> 
-        <span class="n">extxyzkey</span><span class="o">=</span><span class="p">[</span><span class="n">energy_key</span><span class="p">,</span> <span class="n">forces_key</span><span class="p">],</span>
-    <span class="p">)</span>
+    <span class="c1"># If shuffling is enabled, create shuffled versions for each model</span>
+    <span class="c1"># Otherwise, create a single base cumulative file used by all models</span>
+    <span class="k">if</span> <span class="nb">input</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">shuffle_dataset</span><span class="p">:</span>
+        <span class="c1"># Create shuffled datasets for each model</span>
+        <span class="k">for</span> <span class="n">model_idx</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">input</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">model_num</span><span class="p">):</span>
+            <span class="n">executor</span><span class="o">.</span><span class="n">run_python_fn</span><span class="p">(</span><span class="n">make_mace_cumulative_dataset</span><span class="p">)(</span>
+                <span class="n">dataset_dir</span><span class="o">=</span><span class="n">new_dataset_dir</span><span class="p">,</span>
+                <span class="n">dataset_collection</span><span class="o">=</span><span class="p">[</span><span class="n">a</span><span class="o">.</span><span class="n">to_dict</span><span class="p">()</span> <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">train_artifacts</span><span class="p">],</span>
+                <span class="n">type_map</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">type_map</span><span class="p">,</span>
+                <span class="n">extxyzkey</span><span class="o">=</span><span class="p">[</span><span class="n">energy_key</span><span class="p">,</span> <span class="n">forces_key</span><span class="p">],</span>
+                <span class="n">shuffle_seed</span><span class="o">=</span><span class="n">model_idx</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="c1"># Set base filename for task dirs to construct shuffled names from</span>
+        <span class="n">cumulative_train_file</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">new_dataset_dir</span><span class="p">,</span> <span class="s1">&#39;train.xyz&#39;</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="c1"># Create single unshuffled file used by all models (original behavior)</span>
+        <span class="n">cumulative_train_file</span> <span class="o">=</span> <span class="n">executor</span><span class="o">.</span><span class="n">run_python_fn</span><span class="p">(</span><span class="n">make_mace_cumulative_dataset</span><span class="p">)(</span>
+            <span class="n">dataset_dir</span><span class="o">=</span><span class="n">new_dataset_dir</span><span class="p">,</span> 
+            <span class="n">dataset_collection</span><span class="o">=</span><span class="p">[</span><span class="n">a</span><span class="o">.</span><span class="n">to_dict</span><span class="p">()</span> <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">train_artifacts</span><span class="p">],</span> 
+            <span class="n">type_map</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">type_map</span><span class="p">,</span> 
+            <span class="n">extxyzkey</span><span class="o">=</span><span class="p">[</span><span class="n">energy_key</span><span class="p">,</span> <span class="n">forces_key</span><span class="p">],</span>
+        <span class="p">)</span>
 
     <span class="c1"># make task dirs</span>
     <span class="n">mace_task_dirs</span> <span class="o">=</span> <span class="n">executor</span><span class="o">.</span><span class="n">run_python_fn</span><span class="p">(</span><span class="n">make_mace_task_dirs</span><span class="p">)(</span>
@@ -651,6 +674,7 @@ document.write(`
         <span class="n">base_dir</span><span class="o">=</span><span class="n">tasks_dir</span><span class="p">,</span>
         <span class="n">cumulative_train_file</span><span class="o">=</span><span class="n">cumulative_train_file</span><span class="p">,</span>
         <span class="n">input_modifier_fn</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">input_modifier_fn</span><span class="p">,</span>
+        <span class="n">shuffle_dataset</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">shuffle_dataset</span><span class="p">,</span>
     <span class="p">)</span>
 
 
@@ -802,18 +826,27 @@ document.write(`
                           <span class="n">base_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
                           <span class="n">cumulative_train_file</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
                           <span class="n">input_modifier_fn</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+                          <span class="n">shuffle_dataset</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
                           <span class="p">):</span>
 
     <span class="n">input_modifier</span> <span class="o">=</span> <span class="n">create_fn</span><span class="p">(</span><span class="n">input_modifier_fn</span><span class="p">,</span> <span class="s1">&#39;input_modifier_fn&#39;</span><span class="p">)</span> <span class="k">if</span> <span class="n">input_modifier_fn</span> <span class="k">else</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span>
 
     <span class="n">mace_task_dirs</span> <span class="o">=</span> <span class="p">[</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">base_dir</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">i</span><span class="si">:</span><span class="s1">03d</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>  <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">model_num</span><span class="p">)]</span>
-    <span class="k">for</span> <span class="n">task_dir</span> <span class="ow">in</span> <span class="n">mace_task_dirs</span><span class="p">:</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">task_dir</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">mace_task_dirs</span><span class="p">):</span>
         <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">task_dir</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        
+        <span class="c1"># If shuffle_dataset is enabled, use the model index as seed to determine train file</span>
+        <span class="c1"># Otherwise, all models share the same train file</span>
+        <span class="k">if</span> <span class="n">shuffle_dataset</span><span class="p">:</span>
+            <span class="n">train_file</span> <span class="o">=</span> <span class="n">cumulative_train_file</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;.xyz&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;_shuffled_</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s1">.xyz&#39;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">train_file</span> <span class="o">=</span> <span class="n">cumulative_train_file</span>
+        
         <span class="n">mace_input</span> <span class="o">=</span> <span class="n">make_mace_input</span><span class="p">(</span>
             <span class="n">input_template</span><span class="o">=</span><span class="n">input_template</span><span class="p">,</span>
             <span class="n">type_map</span><span class="o">=</span><span class="n">type_map</span><span class="p">,</span>
             <span class="n">isolate_outliers</span><span class="o">=</span><span class="n">isolate_outliers</span><span class="p">,</span>
-            <span class="n">train_file</span><span class="o">=</span><span class="n">cumulative_train_file</span><span class="p">,</span>
+            <span class="n">train_file</span><span class="o">=</span><span class="n">train_file</span><span class="p">,</span>
         <span class="p">)</span>
 
         <span class="n">mace_input</span> <span class="o">=</span> <span class="n">input_modifier</span><span class="p">(</span><span class="n">mace_input</span><span class="p">)</span>
@@ -896,14 +929,20 @@ document.write(`
         <span class="n">dataset_collection</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">ArtifactDict</span><span class="p">],</span>
         <span class="n">type_map</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
         <span class="n">extxyzkey</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;ref_energy&#39;</span><span class="p">,</span> <span class="s1">&#39;ref_forces&#39;</span><span class="p">],</span>
+        <span class="n">shuffle_seed</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
 <span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;create mace cumulative dataset since this is mace specific&quot;&quot;&quot;</span>
     <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">dataset_dir</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-    <span class="n">train_file</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">dataset_dir</span><span class="p">,</span> <span class="s1">&#39;train.xyz&#39;</span><span class="p">)</span>
+    
+    <span class="c1"># If shuffle_seed is provided, create a shuffled version with the seed in the filename</span>
+    <span class="k">if</span> <span class="n">shuffle_seed</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">train_file</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">dataset_dir</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;train_shuffled_</span><span class="si">{</span><span class="n">shuffle_seed</span><span class="si">}</span><span class="s1">.xyz&#39;</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">train_file</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">dataset_dir</span><span class="p">,</span> <span class="s1">&#39;train.xyz&#39;</span><span class="p">)</span>
 
     <span class="c1"># define a function to write the cumulative file in data.py</span>
-    <span class="n">write_mace_cumulative_dataset</span><span class="p">(</span><span class="n">train_file</span><span class="p">,</span> <span class="n">dataset_collection</span><span class="p">,</span> <span class="n">type_map</span><span class="p">,</span> <span class="n">extxyzkey</span><span class="p">)</span>
-    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Created cumulative dataset: </span><span class="si">{</span><span class="n">train_file</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+    <span class="n">write_mace_cumulative_dataset</span><span class="p">(</span><span class="n">train_file</span><span class="p">,</span> <span class="n">dataset_collection</span><span class="p">,</span> <span class="n">type_map</span><span class="p">,</span> <span class="n">extxyzkey</span><span class="p">,</span> <span class="n">shuffle_seed</span><span class="o">=</span><span class="n">shuffle_seed</span><span class="p">)</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Created cumulative dataset: </span><span class="si">{</span><span class="n">train_file</span><span class="si">}</span><span class="s1">&#39;</span> <span class="o">+</span> <span class="p">(</span><span class="sa">f</span><span class="s1">&#39; (shuffled with seed </span><span class="si">{</span><span class="n">shuffle_seed</span><span class="si">}</span><span class="s1">)&#39;</span> <span class="k">if</span> <span class="n">shuffle_seed</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="s1">&#39;&#39;</span><span class="p">))</span>
     <span class="k">return</span> <span class="n">train_file</span></div>
 </pre></div>
 

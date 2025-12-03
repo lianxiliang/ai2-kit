@@ -550,7 +550,8 @@ document.write(`
         <span class="n">type_map</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
         <span class="n">extxyzkey</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;energy&#39;</span><span class="p">,</span> <span class="s1">&#39;forces&#39;</span><span class="p">],</span>
         <span class="n">max_structures</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-        <span class="n">sample_method</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;sequential&#39;</span>
+        <span class="n">sample_method</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;sequential&#39;</span><span class="p">,</span>
+        <span class="n">shuffle_seed</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
 <span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Write multiple datasets from artifact collection to a MACE-compatible extxyz file.</span>
@@ -566,6 +567,9 @@ document.write(`
 <span class="sd">    :param max_structures: Maximum number of structures to write, None means all</span>
 <span class="sd">    :param sample_method: Method for sampling structures if max_structures is set:</span>
 <span class="sd">                         &#39;sequential&#39; (default), &#39;random&#39;, &#39;even&#39;</span>
+<span class="sd">    :param shuffle_seed: Optional seed for shuffling the dataset order. Different seeds create</span>
+<span class="sd">                         different training orders, which can increase ensemble diversity.</span>
+<span class="sd">                         If None, no shuffling is performed.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="kn">from</span><span class="w"> </span><span class="nn">ai2_kit.tool.dpdata</span><span class="w"> </span><span class="kn">import</span> <span class="n">read</span><span class="p">,</span> <span class="n">deepmd2ase</span>
     <span class="kn">from</span><span class="w"> </span><span class="nn">ai2_kit.core.log</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_logger</span>
@@ -591,6 +595,12 @@ document.write(`
             <span class="n">all_atoms</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">atoms_list</span><span class="p">)</span>
     <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
         <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error processing datasets: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    
+    <span class="c1"># Shuffle dataset if seed is provided (for ensemble diversity)</span>
+    <span class="k">if</span> <span class="n">shuffle_seed</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">random</span><span class="o">.</span><span class="n">seed</span><span class="p">(</span><span class="n">shuffle_seed</span><span class="p">)</span>
+        <span class="n">random</span><span class="o">.</span><span class="n">shuffle</span><span class="p">(</span><span class="n">all_atoms</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Shuffled </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">all_atoms</span><span class="p">)</span><span class="si">}</span><span class="s2"> structures with seed </span><span class="si">{</span><span class="n">shuffle_seed</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
     
     <span class="c1"># Sample structures if requested</span>
     <span class="k">if</span> <span class="n">max_structures</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">max_structures</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">all_atoms</span><span class="p">):</span>
