@@ -17,7 +17,7 @@ import dpdata
 import numpy as np
 
 from .iface import ICllTrainOutput, BaseCllContext, TRAINING_MODE
-from .data import DataFormat, get_data_format
+from .data import DataFormat, get_data_format, mace_xyz_to_dpdata
 from .dpff import set_dpff_ext_from_cp2k_output
 from .dplr import dplr_v3_to_v2
 
@@ -516,6 +516,9 @@ def make_deepmd_dataset(
                 dp_system = dpdata.LabeledSystem(os.path.join(raw_data['url'], 'output'), fmt='cp2k/output', type_map=type_map)
             elif data_format == DataFormat.VASP_OUTPUT_DIR:
                 dp_system = dpdata.LabeledSystem(os.path.join(raw_data['url'], 'OUTCAR'), fmt='vasp/outcar', type_map=type_map)
+            elif data_format == DataFormat.MACE_OUTPUT_DIR:
+                xyz_file = os.path.join(raw_data['url'], 'output.xyz')
+                dp_system = mace_xyz_to_dpdata(xyz_file, type_map=type_map)
             else:
                 raise ValueError(f"Unsupported data format: {data_format}")
         except Exception as e:

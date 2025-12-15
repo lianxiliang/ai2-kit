@@ -188,3 +188,54 @@ def write_mace_cumulative_dataset(
         logger.warning("No structures were processed.")
     
     return train_file
+
+
+def mace_xyz_to_dpdata(xyzfile: str, type_map: List[str]):
+    """
+    convert the mace xyz file for deepmd training, used for foundation model 
+    
+    :param xyzfile: xyz file path obtained from previous iter
+    :type xyzfile: str
+    :param type_map: type map
+    :type type_map: List[str]
+    """
+    from ai2_kit.core.log import get_logger
+    logger = get_logger(__name__)
+
+    from ase.calculators.singlepoint import SinglePointCalculator
+    import dpdata
+    if not os.path.exists(xyzfile):
+        raise FileNotFoundError(f'MACE output file not found: {xyzfile}')
+    
+    try: 
+        atoms_list = ase.io.read(xyzfile, index=':')
+    except Exception as e:
+        raise ValueError(f'Failed to read XYZ file {xyzfile}: {e}')
+    
+    # Process frames and attach MACE results
+    valid_atoms = []
+    for i, atoms in enumerate(atoms_list):
+        ener = atoms.info.get('MACE_energy')
+        frc = atoms.arrays.get('MACE_forces')
+        
+        if ener is None or frc is None:
+            logger.warning(f'Frame {i} missing MACE_energy or MACE_forces. Skipping.')
+            continue
+        
+        atoms.calc = SinglePointCalculator(atoms, energy=ener, forces=frc)
+        valid_atoms.append(atoms)
+
+    if not valid_atoms:
+        raise ValueError(f"No valid structures found in {xyzfile}")
+    
+    # Convert all valid frames to dpdata using dpdata's native ase/structure support
+    labeled_systems = [dpdata.LabeledSystem(atoms, fmt='ase/structure') for atoms in valid_atoms]
+    
+    # Merge using dpdata's built-in method
+    merged = labeled_systems[0]
+    for ls in labeled_systems[1:]:
+        merged += ls
+    
+    return merged    
+
+
