@@ -15,6 +15,7 @@ from ai2_kit.domain import (
     selector,
     cp2k,
     vasp,
+    fmlabel,
     constant as const,
     updater,
     anyware,
@@ -24,6 +25,7 @@ from ai2_kit.domain import (
     lasp as _lasp,
     cp2k as _cp2k,
     vasp as _vasp,
+    fmlabel as _fmlabel,
     anyware as _anyware,
     mace as _mace,
     macelmp as _macelmp,
@@ -59,6 +61,7 @@ class CllWorkflowExecutorConfig(BaseExecutorConfig):
         class Label(BaseModel):
             cp2k: Optional[_cp2k.CllCp2kContextConfig] = None
             vasp: Optional[_vasp.CllVaspContextConfig] = None
+            fmlabel: Optional[_fmlabel.CllFmLabelContextConfig] = None
 
         train: Train
         explore: Explore
@@ -80,6 +83,7 @@ class WorkflowConfig(BaseModel):
     class Label(BaseModel):
         cp2k: Optional[_cp2k.CllCp2kInputConfig] = None
         vasp: Optional[_vasp.CllVaspInputConfig] = None
+        fmlabel: Optional[_fmlabel.CllFmLabelInputConfig] = None
 
     class Train(BaseModel):
         deepmd: Optional[_deepmd.CllDeepmdInputConfig] = None
@@ -214,6 +218,20 @@ async def cll_mlp_training_workflow(config: CllWorkflowConfig,
             )
             label_output = await apply_checkpoint(f'{cp_prefix}/label-vasp')(vasp.cll_vasp)(vasp_input, vasp_context)
 
+        elif workflow_config.label.fmlabel and context_config.label.fmlabel:
+            fmlabel_input = fmlabel.CllFmLabelInput(
+                config=workflow_config.label.fmlabel,
+                type_map=type_map,
+                system_files=[] if selector_output is None else selector_output.get_model_devi_dataset(),
+                initiated=i > 0,
+            )
+            fmlabel_context = fmlabel.CllFmLabelContext(
+                config=context_config.label.fmlabel,
+                path_prefix=os.path.join(iter_path_prefix, 'label-fmlabel'),
+                resource_manager=resource_manager,
+            )
+            label_output = await apply_checkpoint(f'{cp_prefix}/label-fmlabel')(fmlabel.cll_fmlabel)(fmlabel_input, fmlabel_context)
+        
         else:
             raise ValueError('No label method is specified')
 

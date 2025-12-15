@@ -1,20 +1,18 @@
 from ai2_kit.core.artifact import Artifact, ArtifactDict
 from ai2_kit.core.script import BashScript, BashStep, BashTemplate
 from ai2_kit.core.job import gather_jobs
-from ai2_kit.core.util import dict_nested_get, list_split, list_sample, dump_json, dump_text
+from ai2_kit.core.util import list_sample, dump_json
 from ai2_kit.core.log import get_logger
 from ai2_kit.core.pydantic import BaseModel
 
-from typing import List, Tuple, Literal, Optional, Mapping, Any, Iterable
+from typing import List, Tuple, Literal
 from dataclasses import dataclass
 from ase import Atoms, io
 
-from string import Template
-import copy
 import os
 
 from .data import DataFormat, artifacts_to_ase_atoms
-from .iface import ICllLabelOutput, BaseCllContext, TRAINING_MODE
+from .iface import ICllLabelOutput, BaseCllContext
 
 
 logger = get_logger(__name__)
@@ -43,9 +41,8 @@ class CllFmLabelInputConfig(BaseModel):
 
     ignore_error: bool = False
     """
-    Ignore error when running cp2k.
+    Ignore error when running FM labeling.
     """
-
 
 class CllFmLabelContextConfig(BaseModel):
     script_template: BashTemplate
@@ -56,7 +53,6 @@ class CllFmLabelContextConfig(BaseModel):
 @dataclass
 class CllFmLabelInput:
     config: CllFmLabelInputConfig
-    mode: TRAINING_MODE
     system_files: List[Artifact]
     type_map: List[str]
     initiated: bool = False  # FIXME: this seems to be a bad design idea
@@ -114,7 +110,7 @@ async def cll_fmlabel(input: CllFmLabelInput, ctx: CllFmLabelContext) -> Generic
     step = BashStep(
         cwd=fm_task_dir['url'],
         cmd=cmd,
-        checkpoint='fm_label',
+        checkpoint='fmlabel',
         exit_on_error=not input.config.ignore_error,
     )
 
