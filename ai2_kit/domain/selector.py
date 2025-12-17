@@ -406,6 +406,16 @@ def select_structures_by_model_devi(model_devi_output: ArtifactDict,
         next_df = df.head(1)  # the first frame is the initial structure
     else:
         next_df = _ndf[_ndf[force_col] <= _ndf[force_col].quantile(new_explore_system_q)].tail(1)
+    
+    # Apply force filtering to next structures
+    if max_atomic_force is not None and len(next_df) > 0:
+        next_df = filter_structures_by_force(
+            atoms_list=atoms_list,
+            df=next_df,
+            max_atomic_force=max_atomic_force,
+            work_dir=work_dir,
+            log_stats=False,  # Silent for next structure selection
+        )
 
     stats = {
         'src': model_devi_file,
