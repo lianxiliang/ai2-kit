@@ -14,6 +14,7 @@ import traceback
 
 import ase.io
 import os
+import numpy as np
 
 from .data import get_data_format, DataFormat, artifacts_to_ase_atoms
 from .iface import ICllSelectorOutput, BaseCllContext
@@ -68,6 +69,15 @@ class CllModelDeviSelectorInputConfig(BaseModel):
     """
     number of workers to run the analysis
     """
+    max_atomic_force: Optional[float] = None
+    """
+    Maximum allowed atomic force (eV/Å). Structures exceeding this are filtered 
+    from decent candidates before ASAP clustering. Recommended: 10.0 for MACE fine-tuning.
+    """
+    log_force_stats: bool = False
+    """
+    Log force distribution statistics.
+    """   
 
 
 @dataclass
@@ -119,6 +129,9 @@ async def cll_model_devi_selector(input: CllModelDeviSelectorInput, ctx: CllMode
         max_decent_per_traj=input.config.max_decent_per_traj,
         screening_fn=input.config.screening_fn,
         workers=input.config.workers,
+        max_atomic_force=input.config.max_atomic_force,
+        log_force_stats=input.config.log_force_stats,
+
     )
 
     candidates = [ result['decent'] for result, _ in results if 'decent' in result ]
@@ -185,6 +198,8 @@ def bulk_select_structures_by_model_devi(model_devi_outputs: List[ArtifactDict],
                                             work_dir: str,
                                             max_decent_per_traj: int,
                                             screening_fn: Optional[str],
+                                            max_atomic_force: Optional[float] = None,
+                                            log_force_stats: bool = False,
                                             workers: int = 4,
                                             ) -> List[Tuple[Dict[str, ArtifactDict], dict]]:
     import joblib
@@ -198,9 +213,94 @@ def bulk_select_structures_by_model_devi(model_devi_outputs: List[ArtifactDict],
             max_decent_per_traj=max_decent_per_traj,
             new_explore_system_q=new_explore_system_q,
             screening_fn=screening_fn,
+            max_atomic_force=max_atomic_force,
+            log_force_stats=log_force_stats,
+
         )
         for i, output in enumerate(model_devi_outputs)
     )  # type: ignore
+
+
+def get_max_atomic_force(atoms: ase.Atoms) -> Optional[float]:
+    """
+    Get maximum atomic force magnitude from an Atoms object.
+    Tries atoms.get_forces() first, then falls back to atoms.arrays['forces'].
+    
+    :param atoms: ASE Atoms object
+    :return: Maximum force magnitude in eV/Å, or None if forces not available
+    """
+    forces = None
+    try:
+        forces = atoms.get_forces()
+    except (RuntimeError, AttributeError):
+        pass
+
+    if forces is None and 'forces' in atoms.arrays:
+        forces = atoms.arrays['forces']
+    
+    if forces is not None:
+        forcesnorm = np.linalg.norm(forces, axis=1)
+        maxforce = np.max(forcesnorm)
+        return float(maxforce)
+    
+    return None
+
+
+def filter_structures_by_force(atoms_list: List[ase.Atoms],
+                               df: pd.DataFrame,
+                               max_atomic_force: float,
+                               work_dir: str,
+                               log_stats: bool = False) -> pd.DataFrame :
+    """
+    Filter structures by maximum atomic force.
+    
+    :param atoms_list: List of ASE Atoms objects
+    :param df: DataFrame with structure indices
+    :param max_atomic_force: Maximum allowed force in eV/Å
+    :param work_dir: Directory for saving statistics
+    :param log_stats: Whether to log detailed statistics
+    :return: Filtered DataFrame
+    """
+    if len(df) == 0:
+        return df
+    # compute the max forces for each structure
+    max_forces = []
+    for idx in df.index:
+        atoms = atoms_list[idx]
+        maxfrc = get_max_atomic_force(atoms)
+        if maxfrc is None:
+            logger.warning(f'No forces available for frame {idx}, skipping force filter')
+            max_forces.append(0.0)
+        else:
+            max_forces.append(maxfrc)
+   
+    # apply filter
+    max_forces = np.array(max_forces)
+    valid_mask = max_forces <= max_atomic_force
+    filtered_df = df.loc[df.index[valid_mask]]
+
+    n_before = len(df)
+    n_after = len(filtered_df)
+    
+    # Basic logging (always)
+    logger.info(f'Force filtering (threshold={max_atomic_force} eV/Å): kept {n_after}/{n_before} structures')
+    
+    # Detailed logging (only if requested)
+    if log_stats and len(max_forces) > 0:
+        logger.info(f'  Force range: [{np.min(max_forces):.2f}, {np.max(max_forces):.2f}] eV/Å')
+        logger.info(f'  Median: {np.median(max_forces):.2f} eV/Å, 95th percentile: {np.percentile(max_forces, 95):.2f} eV/Å')
+    
+    # Save detailed stats for post-analysis (silent)
+    if n_before > 0:
+        stats = {
+            'threshold': max_atomic_force,
+            'n_before': int(n_before),
+            'n_after': int(n_after),
+            'max_forces': max_forces.tolist(),
+        }
+        dump_json(stats, os.path.join(work_dir, 'force_filter_stats.json'))
+
+    return filtered_df
 
 
 def select_structures_by_model_devi(model_devi_output: ArtifactDict,
@@ -212,6 +312,8 @@ def select_structures_by_model_devi(model_devi_output: ArtifactDict,
                                     new_explore_system_q: float,
                                     max_decent_per_traj: int,
                                     screening_fn: Optional[str],
+                                    max_atomic_force: Optional[float] = None,
+                                    log_force_stats: bool = False,
                                     ) -> Tuple[Dict[str, ArtifactDict], dict]:
     """
     analysis the model_devi output of explore stage and select candidates
@@ -282,6 +384,16 @@ def select_structures_by_model_devi(model_devi_output: ArtifactDict,
     good_df   = df[df[force_col] < f_trust_lo]
     decent_df = df[(df[force_col] >= f_trust_lo) & (df[force_col] < f_trust_hi)]
     poor_df   = df[df[force_col] >= f_trust_hi]
+
+    # filter structures based on max atomic forces
+    if max_atomic_force is not None:
+        decent_df = filter_structures_by_force(
+            atoms_list=atoms_list,
+            df=decent_df,
+            max_atomic_force=max_atomic_force,
+            work_dir=work_dir,
+            log_stats=log_force_stats,
+        )
 
     # select the last frame from df whose model_devi score is less than the quantile
     # as the initial structure for next round of exploration to replace the original one
