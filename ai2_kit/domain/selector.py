@@ -405,17 +405,26 @@ def select_structures_by_model_devi(model_devi_output: ArtifactDict,
     if len(_ndf) == 0:
         next_df = df.head(1)  # the first frame is the initial structure
     else:
-        next_df = _ndf[_ndf[force_col] <= _ndf[force_col].quantile(new_explore_system_q)].tail(1)
-    
-    # Apply force filtering to next structures
-    if max_atomic_force is not None and len(next_df) > 0:
-        next_df = filter_structures_by_force(
-            atoms_list=atoms_list,
-            df=next_df,
-            max_atomic_force=max_atomic_force,
-            work_dir=work_dir,
-            log_stats=False,  # Silent for next structure selection
-        )
+        next_candidates = _ndf[_ndf[force_col] <= _ndf[force_col].quantile(new_explore_system_q)]
+        
+        # Apply force filtering with walkback strategy
+        if max_atomic_force is not None and len(next_candidates) > 0:
+            # Walk backwards from last frame until we find one passing force threshold
+            found_valid = False
+            for idx in reversed(next_candidates.index):
+                max_force = get_max_atomic_force(atoms_list[idx])
+                if max_force is None or max_force <= max_atomic_force:
+                    next_df = next_candidates.loc[[idx]]
+                    found_valid = True
+                    break
+            
+            # Ultimate fallback: if all frames exceed threshold, take the first frame
+            if not found_valid:
+                logger.warning(f'All candidate frames exceed force threshold {max_atomic_force} eV/Å, using first frame as fallback')
+                next_df = df.head(1)
+        else:
+            # No force filtering, use original logic
+            next_df = next_candidates.tail(1)
 
     stats = {
         'src': model_devi_file,
