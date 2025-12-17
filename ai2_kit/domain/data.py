@@ -229,7 +229,7 @@ def mace_xyz_to_dpdata(xyzfile: str, type_map: List[str]):
         raise ValueError(f"No valid structures found in {xyzfile}")
     
     # Convert all valid frames to dpdata using dpdata's native ase/structure support
-    labeled_systems = [dpdata.LabeledSystem(atoms, fmt='ase/structure') for atoms in valid_atoms]
+    labeled_systems = [dpdata.LabeledSystem(atoms, fmt='ase/structure', type_map=type_map) for atoms in valid_atoms]
     
     # Merge using dpdata's built-in method
     merged = labeled_systems[0]
