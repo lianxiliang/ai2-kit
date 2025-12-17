@@ -408,7 +408,7 @@ def select_structures_by_model_devi(model_devi_output: ArtifactDict,
         next_candidates = _ndf[_ndf[force_col] <= _ndf[force_col].quantile(new_explore_system_q)]
         
         # Apply force filtering with walkback strategy
-        if max_atomic_force is not None and len(next_candidates) > 0:
+        if max_atomic_force is not None:
             # Walk backwards from last frame until we find one passing force threshold
             found_valid = False
             for idx in reversed(next_candidates.index):
