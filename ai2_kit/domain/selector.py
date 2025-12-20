@@ -73,10 +73,7 @@ class CllModelDeviSelectorInputConfig(BaseModel):
     """
     Maximum allowed atomic force (eV/Å). Structures exceeding this are filtered 
     from decent candidates before ASAP clustering. Recommended: 10.0 for MACE fine-tuning.
-    """
-    log_force_stats: bool = False
-    """
-    Log force distribution statistics.
+    Statistics are saved to force_filter_stats.json in the work directory.
     """   
 
 
@@ -130,8 +127,6 @@ async def cll_model_devi_selector(input: CllModelDeviSelectorInput, ctx: CllMode
         screening_fn=input.config.screening_fn,
         workers=input.config.workers,
         max_atomic_force=input.config.max_atomic_force,
-        log_force_stats=input.config.log_force_stats,
-
     )
 
     candidates = [ result['decent'] for result, _ in results if 'decent' in result ]
@@ -199,7 +194,6 @@ def bulk_select_structures_by_model_devi(model_devi_outputs: List[ArtifactDict],
                                             max_decent_per_traj: int,
                                             screening_fn: Optional[str],
                                             max_atomic_force: Optional[float] = None,
-                                            log_force_stats: bool = False,
                                             workers: int = 4,
                                             ) -> List[Tuple[Dict[str, ArtifactDict], dict]]:
     import joblib
@@ -214,8 +208,6 @@ def bulk_select_structures_by_model_devi(model_devi_outputs: List[ArtifactDict],
             new_explore_system_q=new_explore_system_q,
             screening_fn=screening_fn,
             max_atomic_force=max_atomic_force,
-            log_force_stats=log_force_stats,
-
         )
         for i, output in enumerate(model_devi_outputs)
     )  # type: ignore
@@ -249,8 +241,7 @@ def get_max_atomic_force(atoms: ase.Atoms) -> Optional[float]:
 def filter_structures_by_force(atoms_list: List[ase.Atoms],
                                df: pd.DataFrame,
                                max_atomic_force: float,
-                               work_dir: str,
-                               log_stats: bool = False) -> pd.DataFrame :
+                               work_dir: str) -> pd.DataFrame :
     """
     Filter structures by maximum atomic force.
     
@@ -258,7 +249,6 @@ def filter_structures_by_force(atoms_list: List[ase.Atoms],
     :param df: DataFrame with structure indices
     :param max_atomic_force: Maximum allowed force in eV/Å
     :param work_dir: Directory for saving statistics
-    :param log_stats: Whether to log detailed statistics
     :return: Filtered DataFrame
     """
     if len(df) == 0:
@@ -269,7 +259,6 @@ def filter_structures_by_force(atoms_list: List[ase.Atoms],
         atoms = atoms_list[idx]
         maxfrc = get_max_atomic_force(atoms)
         if maxfrc is None:
-            logger.warning(f'No forces available for frame {idx}, skipping force filter')
             max_forces.append(0.0)
         else:
             max_forces.append(maxfrc)
@@ -282,15 +271,7 @@ def filter_structures_by_force(atoms_list: List[ase.Atoms],
     n_before = len(df)
     n_after = len(filtered_df)
     
-    # Basic logging (always)
-    logger.info(f'Force filtering (threshold={max_atomic_force} eV/Å): kept {n_after}/{n_before} structures')
-    
-    # Detailed logging (only if requested)
-    if log_stats and len(max_forces) > 0:
-        logger.info(f'  Force range: [{np.min(max_forces):.2f}, {np.max(max_forces):.2f}] eV/Å')
-        logger.info(f'  Median: {np.median(max_forces):.2f} eV/Å, 95th percentile: {np.percentile(max_forces, 95):.2f} eV/Å')
-    
-    # Save detailed stats for post-analysis (silent)
+    # Save detailed stats for post-analysis
     if n_before > 0:
         stats = {
             'threshold': max_atomic_force,
@@ -313,7 +294,6 @@ def select_structures_by_model_devi(model_devi_output: ArtifactDict,
                                     max_decent_per_traj: int,
                                     screening_fn: Optional[str],
                                     max_atomic_force: Optional[float] = None,
-                                    log_force_stats: bool = False,
                                     ) -> Tuple[Dict[str, ArtifactDict], dict]:
     """
     analysis the model_devi output of explore stage and select candidates
@@ -392,7 +372,6 @@ def select_structures_by_model_devi(model_devi_output: ArtifactDict,
             df=decent_df,
             max_atomic_force=max_atomic_force,
             work_dir=work_dir,
-            log_stats=log_force_stats,
         )
 
     # select the last frame from df whose model_devi score is less than the quantile
