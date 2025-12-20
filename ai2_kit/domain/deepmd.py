@@ -561,8 +561,15 @@ def make_deepmd_dataset(
         if fparam is not None:
             set_fparam(dp_system, fparam)
 
-        if isolate_outliers and dp_system.data['forces'].max() > outlier_f_cutoff:
-            outlier_collection.append((raw_data, dp_system))
+        # Check maximum atomic force magnitude (not just max component)
+        if isolate_outliers:
+            forces = dp_system.data['forces']  # shape: (n_frames, n_atoms, 3)
+            # Compute force magnitude per atom, then take max across atoms and frames
+            max_atomic_force = np.max(np.linalg.norm(forces, axis=2))
+            if max_atomic_force > outlier_f_cutoff:
+                outlier_collection.append((raw_data, dp_system))
+            else:
+                dataset_collection.append((raw_data, dp_system))
         else:
             dataset_collection.append((raw_data, dp_system))
 
