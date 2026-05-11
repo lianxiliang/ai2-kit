@@ -240,6 +240,7 @@ const thebe_selector_output = ".output, .cell_output"
 <li class="toctree-l4"><a class="reference internal" href="../../../_api/ai2_kit.domain.deepmd.html">ai2_kit.domain.deepmd module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../../_api/ai2_kit.domain.dpff.html">ai2_kit.domain.dpff module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../../_api/ai2_kit.domain.dplr.html">ai2_kit.domain.dplr module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_api/ai2_kit.domain.fmlabel.html">ai2_kit.domain.fmlabel module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../../_api/ai2_kit.domain.iface.html">ai2_kit.domain.iface module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../../_api/ai2_kit.domain.lammps.html">ai2_kit.domain.lammps module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../../_api/ai2_kit.domain.lasp.html">ai2_kit.domain.lasp module</a></li>
@@ -452,6 +453,7 @@ document.write(`
 
 <span class="kn">import</span><span class="w"> </span><span class="nn">ase.io</span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
 
 <span class="kn">from</span><span class="w"> </span><span class="nn">.data</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_data_format</span><span class="p">,</span> <span class="n">DataFormat</span><span class="p">,</span> <span class="n">artifacts_to_ase_atoms</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">.iface</span><span class="w"> </span><span class="kn">import</span> <span class="n">ICllSelectorOutput</span><span class="p">,</span> <span class="n">BaseCllContext</span>
@@ -505,7 +507,13 @@ document.write(`
     <span class="n">workers</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">4</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    number of workers to run the analysis</span>
-<span class="sd">    &quot;&quot;&quot;</span></div>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">max_atomic_force</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Maximum allowed atomic force (eV/Å). Structures exceeding this are filtered </span>
+<span class="sd">    from decent candidates before ASAP clustering. Recommended: 10.0 for MACE fine-tuning.</span>
+<span class="sd">    Statistics are saved to force_filter_stats.json in the work directory.</span>
+<span class="sd">    &quot;&quot;&quot;</span>   </div>
 
 
 <div class="viewcode-block" id="CllModelDevSelectorContext"><a class="viewcode-back" href="../../../_api/ai2_kit.domain.selector.html#ai2_kit.domain.selector.CllModelDevSelectorContext">[docs]</a><span class="nd">@dataclass</span>
@@ -557,6 +565,7 @@ document.write(`
         <span class="n">max_decent_per_traj</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">max_decent_per_traj</span><span class="p">,</span>
         <span class="n">screening_fn</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">screening_fn</span><span class="p">,</span>
         <span class="n">workers</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">workers</span><span class="p">,</span>
+        <span class="n">max_atomic_force</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">max_atomic_force</span><span class="p">,</span>
     <span class="p">)</span>
 
     <span class="n">candidates</span> <span class="o">=</span> <span class="p">[</span> <span class="n">result</span><span class="p">[</span><span class="s1">&#39;decent&#39;</span><span class="p">]</span> <span class="k">for</span> <span class="n">result</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">results</span> <span class="k">if</span> <span class="s1">&#39;decent&#39;</span> <span class="ow">in</span> <span class="n">result</span> <span class="p">]</span>
@@ -623,6 +632,7 @@ document.write(`
                                             <span class="n">work_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
                                             <span class="n">max_decent_per_traj</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
                                             <span class="n">screening_fn</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+                                            <span class="n">max_atomic_force</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
                                             <span class="n">workers</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">4</span><span class="p">,</span>
                                             <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">Tuple</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">ArtifactDict</span><span class="p">],</span> <span class="nb">dict</span><span class="p">]]:</span>
     <span class="kn">import</span><span class="w"> </span><span class="nn">joblib</span>
@@ -636,9 +646,81 @@ document.write(`
             <span class="n">max_decent_per_traj</span><span class="o">=</span><span class="n">max_decent_per_traj</span><span class="p">,</span>
             <span class="n">new_explore_system_q</span><span class="o">=</span><span class="n">new_explore_system_q</span><span class="p">,</span>
             <span class="n">screening_fn</span><span class="o">=</span><span class="n">screening_fn</span><span class="p">,</span>
+            <span class="n">max_atomic_force</span><span class="o">=</span><span class="n">max_atomic_force</span><span class="p">,</span>
         <span class="p">)</span>
         <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">output</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">model_devi_outputs</span><span class="p">)</span>
     <span class="p">)</span>  <span class="c1"># type: ignore</span></div>
+
+
+<div class="viewcode-block" id="get_max_atomic_force"><a class="viewcode-back" href="../../../_api/ai2_kit.domain.selector.html#ai2_kit.domain.selector.get_max_atomic_force">[docs]</a><span class="k">def</span><span class="w"> </span><span class="nf">get_max_atomic_force</span><span class="p">(</span><span class="n">atoms</span><span class="p">:</span> <span class="n">ase</span><span class="o">.</span><span class="n">Atoms</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Get maximum atomic force magnitude from an Atoms object.</span>
+<span class="sd">    Tries atoms.get_forces() first, then falls back to atoms.arrays[&#39;forces&#39;].</span>
+<span class="sd">    </span>
+<span class="sd">    :param atoms: ASE Atoms object</span>
+<span class="sd">    :return: Maximum force magnitude in eV/Å, or None if forces not available</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">forces</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">forces</span> <span class="o">=</span> <span class="n">atoms</span><span class="o">.</span><span class="n">get_forces</span><span class="p">()</span>
+    <span class="k">except</span> <span class="p">(</span><span class="ne">RuntimeError</span><span class="p">,</span> <span class="ne">AttributeError</span><span class="p">):</span>
+        <span class="k">pass</span>
+
+    <span class="k">if</span> <span class="n">forces</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> <span class="s1">&#39;forces&#39;</span> <span class="ow">in</span> <span class="n">atoms</span><span class="o">.</span><span class="n">arrays</span><span class="p">:</span>
+        <span class="n">forces</span> <span class="o">=</span> <span class="n">atoms</span><span class="o">.</span><span class="n">arrays</span><span class="p">[</span><span class="s1">&#39;forces&#39;</span><span class="p">]</span>
+    
+    <span class="k">if</span> <span class="n">forces</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">forcesnorm</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">forces</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">maxforce</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">forcesnorm</span><span class="p">)</span>
+        <span class="k">return</span> <span class="nb">float</span><span class="p">(</span><span class="n">maxforce</span><span class="p">)</span>
+    
+    <span class="k">return</span> <span class="kc">None</span></div>
+
+
+<div class="viewcode-block" id="filter_structures_by_force"><a class="viewcode-back" href="../../../_api/ai2_kit.domain.selector.html#ai2_kit.domain.selector.filter_structures_by_force">[docs]</a><span class="k">def</span><span class="w"> </span><span class="nf">filter_structures_by_force</span><span class="p">(</span><span class="n">atoms_list</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">ase</span><span class="o">.</span><span class="n">Atoms</span><span class="p">],</span>
+                               <span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+                               <span class="n">max_atomic_force</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+                               <span class="n">work_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span> <span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Filter structures by maximum atomic force.</span>
+<span class="sd">    </span>
+<span class="sd">    :param atoms_list: List of ASE Atoms objects</span>
+<span class="sd">    :param df: DataFrame with structure indices</span>
+<span class="sd">    :param max_atomic_force: Maximum allowed force in eV/Å</span>
+<span class="sd">    :param work_dir: Directory for saving statistics</span>
+<span class="sd">    :return: Filtered DataFrame</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">df</span>
+    <span class="c1"># compute the max forces for each structure</span>
+    <span class="n">max_forces</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">idx</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">:</span>
+        <span class="n">atoms</span> <span class="o">=</span> <span class="n">atoms_list</span><span class="p">[</span><span class="n">idx</span><span class="p">]</span>
+        <span class="n">maxfrc</span> <span class="o">=</span> <span class="n">get_max_atomic_force</span><span class="p">(</span><span class="n">atoms</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">maxfrc</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">max_forces</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="mf">0.0</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">max_forces</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">maxfrc</span><span class="p">)</span>
+   
+    <span class="c1"># apply filter</span>
+    <span class="n">max_forces</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">max_forces</span><span class="p">)</span>
+    <span class="n">valid_mask</span> <span class="o">=</span> <span class="n">max_forces</span> <span class="o">&lt;=</span> <span class="n">max_atomic_force</span>
+    <span class="n">filtered_df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">[</span><span class="n">valid_mask</span><span class="p">]]</span>
+
+    <span class="n">n_before</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+    <span class="n">n_after</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">filtered_df</span><span class="p">)</span>
+    
+    <span class="c1"># Save detailed stats for post-analysis</span>
+    <span class="k">if</span> <span class="n">n_before</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">stats</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s1">&#39;threshold&#39;</span><span class="p">:</span> <span class="n">max_atomic_force</span><span class="p">,</span>
+            <span class="s1">&#39;n_before&#39;</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">n_before</span><span class="p">),</span>
+            <span class="s1">&#39;n_after&#39;</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">n_after</span><span class="p">),</span>
+            <span class="s1">&#39;max_forces&#39;</span><span class="p">:</span> <span class="n">max_forces</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span>
+        <span class="p">}</span>
+        <span class="n">dump_json</span><span class="p">(</span><span class="n">stats</span><span class="p">,</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">work_dir</span><span class="p">,</span> <span class="s1">&#39;force_filter_stats.json&#39;</span><span class="p">))</span>
+
+    <span class="k">return</span> <span class="n">filtered_df</span></div>
 
 
 <div class="viewcode-block" id="select_structures_by_model_devi"><a class="viewcode-back" href="../../../_api/ai2_kit.domain.selector.html#ai2_kit.domain.selector.select_structures_by_model_devi">[docs]</a><span class="k">def</span><span class="w"> </span><span class="nf">select_structures_by_model_devi</span><span class="p">(</span><span class="n">model_devi_output</span><span class="p">:</span> <span class="n">ArtifactDict</span><span class="p">,</span>
@@ -650,6 +732,7 @@ document.write(`
                                     <span class="n">new_explore_system_q</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
                                     <span class="n">max_decent_per_traj</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
                                     <span class="n">screening_fn</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+                                    <span class="n">max_atomic_force</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
                                     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">ArtifactDict</span><span class="p">],</span> <span class="nb">dict</span><span class="p">]:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    analysis the model_devi output of explore stage and select candidates</span>
@@ -721,6 +804,15 @@ document.write(`
     <span class="n">decent_df</span> <span class="o">=</span> <span class="n">df</span><span class="p">[(</span><span class="n">df</span><span class="p">[</span><span class="n">force_col</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">f_trust_lo</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="n">force_col</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">f_trust_hi</span><span class="p">)]</span>
     <span class="n">poor_df</span>   <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="n">force_col</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">f_trust_hi</span><span class="p">]</span>
 
+    <span class="c1"># filter structures based on max atomic forces</span>
+    <span class="k">if</span> <span class="n">max_atomic_force</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">decent_df</span> <span class="o">=</span> <span class="n">filter_structures_by_force</span><span class="p">(</span>
+            <span class="n">atoms_list</span><span class="o">=</span><span class="n">atoms_list</span><span class="p">,</span>
+            <span class="n">df</span><span class="o">=</span><span class="n">decent_df</span><span class="p">,</span>
+            <span class="n">max_atomic_force</span><span class="o">=</span><span class="n">max_atomic_force</span><span class="p">,</span>
+            <span class="n">work_dir</span><span class="o">=</span><span class="n">work_dir</span><span class="p">,</span>
+        <span class="p">)</span>
+
     <span class="c1"># select the last frame from df whose model_devi score is less than the quantile</span>
     <span class="c1"># as the initial structure for next round of exploration to replace the original one</span>
     <span class="c1"># the next frame should be selected from good or decent frame</span>
@@ -731,7 +823,26 @@ document.write(`
     <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">_ndf</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
         <span class="n">next_df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">head</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># the first frame is the initial structure</span>
     <span class="k">else</span><span class="p">:</span>
-        <span class="n">next_df</span> <span class="o">=</span> <span class="n">_ndf</span><span class="p">[</span><span class="n">_ndf</span><span class="p">[</span><span class="n">force_col</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="n">_ndf</span><span class="p">[</span><span class="n">force_col</span><span class="p">]</span><span class="o">.</span><span class="n">quantile</span><span class="p">(</span><span class="n">new_explore_system_q</span><span class="p">)]</span><span class="o">.</span><span class="n">tail</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">next_candidates</span> <span class="o">=</span> <span class="n">_ndf</span><span class="p">[</span><span class="n">_ndf</span><span class="p">[</span><span class="n">force_col</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="n">_ndf</span><span class="p">[</span><span class="n">force_col</span><span class="p">]</span><span class="o">.</span><span class="n">quantile</span><span class="p">(</span><span class="n">new_explore_system_q</span><span class="p">)]</span>
+        
+        <span class="c1"># Apply force filtering with walkback strategy</span>
+        <span class="k">if</span> <span class="n">max_atomic_force</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># Walk backwards from last frame until we find one passing force threshold</span>
+            <span class="n">found_valid</span> <span class="o">=</span> <span class="kc">False</span>
+            <span class="k">for</span> <span class="n">idx</span> <span class="ow">in</span> <span class="nb">reversed</span><span class="p">(</span><span class="n">next_candidates</span><span class="o">.</span><span class="n">index</span><span class="p">):</span>
+                <span class="n">max_force</span> <span class="o">=</span> <span class="n">get_max_atomic_force</span><span class="p">(</span><span class="n">atoms_list</span><span class="p">[</span><span class="n">idx</span><span class="p">])</span>
+                <span class="k">if</span> <span class="n">max_force</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">max_force</span> <span class="o">&lt;=</span> <span class="n">max_atomic_force</span><span class="p">:</span>
+                    <span class="n">next_df</span> <span class="o">=</span> <span class="n">next_candidates</span><span class="o">.</span><span class="n">loc</span><span class="p">[[</span><span class="n">idx</span><span class="p">]]</span>
+                    <span class="n">found_valid</span> <span class="o">=</span> <span class="kc">True</span>
+                    <span class="k">break</span>
+            
+            <span class="c1"># Ultimate fallback: if all frames exceed threshold, take the first frame</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">found_valid</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;All candidate frames exceed force threshold </span><span class="si">{</span><span class="n">max_atomic_force</span><span class="si">}</span><span class="s1"> eV/Å, using first frame as fallback&#39;</span><span class="p">)</span>
+                <span class="n">next_df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">head</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># No force filtering, use original logic</span>
+            <span class="n">next_df</span> <span class="o">=</span> <span class="n">next_candidates</span><span class="o">.</span><span class="n">tail</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
 
     <span class="n">stats</span> <span class="o">=</span> <span class="p">{</span>
         <span class="s1">&#39;src&#39;</span><span class="p">:</span> <span class="n">model_devi_file</span><span class="p">,</span>

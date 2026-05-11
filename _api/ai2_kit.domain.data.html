@@ -241,6 +241,7 @@ const thebe_selector_output = ".output, .cell_output"
 <li class="toctree-l4"><a class="reference internal" href="ai2_kit.domain.deepmd.html">ai2_kit.domain.deepmd module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="ai2_kit.domain.dpff.html">ai2_kit.domain.dpff module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="ai2_kit.domain.dplr.html">ai2_kit.domain.dplr module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ai2_kit.domain.fmlabel.html">ai2_kit.domain.fmlabel module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="ai2_kit.domain.iface.html">ai2_kit.domain.iface module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="ai2_kit.domain.lammps.html">ai2_kit.domain.lammps module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="ai2_kit.domain.lasp.html">ai2_kit.domain.lasp module</a></li>
@@ -589,6 +590,20 @@ Deprecated since it is not recommended to use ArtifactDict</p>
 <span class="sig-prename descclassname"><span class="pre">ai2_kit.domain.data.</span></span><span class="sig-name descname"><span class="pre">get_data_format</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">artifact</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Optional</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/ai2_kit/domain/data.html#get_data_format"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ai2_kit.domain.data.get_data_format" title="Permalink to this definition">#</a></dt>
 <dd><p>Get (or guess) data type from artifact dict
 Note: The reason of using dict instead of Artifact is Artifact is not pickleable</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ai2_kit.domain.data.mace_xyz_to_dpdata">
+<span class="sig-prename descclassname"><span class="pre">ai2_kit.domain.data.</span></span><span class="sig-name descname"><span class="pre">mace_xyz_to_dpdata</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">xyzfile</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">type_map</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ai2_kit/domain/data.html#mace_xyz_to_dpdata"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ai2_kit.domain.data.mace_xyz_to_dpdata" title="Permalink to this definition">#</a></dt>
+<dd><p>convert the mace xyz file for deepmd training, used for foundation model</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>xyzfile</strong> (<em>str</em>) – xyz file path obtained from previous iter</p></li>
+<li><p><strong>type_map</strong> (<em>List</em><em>[</em><em>str</em><em>]</em>) – type map</p></li>
+</ul>
+</dd>
+</dl>
 </dd></dl>
 
 <dl class="py function">

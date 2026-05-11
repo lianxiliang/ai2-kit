@@ -240,6 +240,7 @@ const thebe_selector_output = ".output, .cell_output"
 <li class="toctree-l4"><a class="reference internal" href="../../../_api/ai2_kit.domain.deepmd.html">ai2_kit.domain.deepmd module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../../_api/ai2_kit.domain.dpff.html">ai2_kit.domain.dpff module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../../_api/ai2_kit.domain.dplr.html">ai2_kit.domain.dplr module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_api/ai2_kit.domain.fmlabel.html">ai2_kit.domain.fmlabel module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../../_api/ai2_kit.domain.iface.html">ai2_kit.domain.iface module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../../_api/ai2_kit.domain.lammps.html">ai2_kit.domain.lammps module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../../_api/ai2_kit.domain.lasp.html">ai2_kit.domain.lasp module</a></li>
@@ -462,7 +463,8 @@ document.write(`
         <span class="n">sbatch_bin</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;sbatch&#39;</span>
         <span class="n">squeue_bin</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;squeue&#39;</span>
         <span class="n">scancel_bin</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;scancel&#39;</span>
-        <span class="n">polling_interval</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">10</span></div>
+        <span class="n">polling_interval</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">10</span>
+        <span class="n">squeue_timeout</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1200</span>  <span class="c1"># abort if squeue keeps failing for this many seconds (default: 20 min)</span></div>
 
 <div class="viewcode-block" id="QueueSystemConfig.LSF"><a class="viewcode-back" href="../../../_api/ai2_kit.core.queue_system.html#ai2_kit.core.queue_system.QueueSystemConfig.LSF">[docs]</a>    <span class="k">class</span><span class="w"> </span><span class="nc">LSF</span><span class="p">(</span><span class="n">BaseModel</span><span class="p">):</span>
         <span class="n">bsub_bin</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;bsub&#39;</span>
@@ -601,6 +603,9 @@ document.write(`
 
     <span class="n">_last_states</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="k">lambda</span><span class="p">:</span> <span class="n">JobState</span><span class="o">.</span><span class="n">UNKNOWN</span><span class="p">)</span>
     <span class="n">_last_update_at</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">_squeue_failure_count</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">_squeue_first_failure_at</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">_squeue_backoff</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mi">0</span>
 
     <span class="n">translate_table</span> <span class="o">=</span> <span class="p">{</span>
         <span class="s1">&#39;PD&#39;</span><span class="p">:</span> <span class="n">JobState</span><span class="o">.</span><span class="n">PENDING</span><span class="p">,</span>
@@ -656,7 +661,7 @@ document.write(`
 
     <span class="k">def</span><span class="w"> </span><span class="nf">_get_all_states</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">JobState</span><span class="p">]:</span>
         <span class="n">current_ts</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
-        <span class="k">if</span>  <span class="p">(</span><span class="n">current_ts</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">_last_update_at</span><span class="p">)</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_polling_interval</span><span class="p">():</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">current_ts</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">_last_update_at</span><span class="p">)</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_polling_interval</span><span class="p">()</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">_squeue_backoff</span><span class="p">:</span>
             <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_last_states</span>
 
         <span class="c1"># call squeue to get all states</span>
@@ -664,9 +669,27 @@ document.write(`
         <span class="k">try</span><span class="p">:</span>
             <span class="n">r</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">connector</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">cmd</span><span class="p">,</span> <span class="n">hide</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
         <span class="k">except</span> <span class="n">invoke</span><span class="o">.</span><span class="n">exceptions</span><span class="o">.</span><span class="n">UnexpectedExit</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-            <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Error when calling squeue: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_squeue_failure_count</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_squeue_first_failure_at</span> <span class="o">=</span> <span class="n">current_ts</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_squeue_failure_count</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_last_update_at</span> <span class="o">=</span> <span class="n">current_ts</span>  <span class="c1"># prevent tight retry loop</span>
+            <span class="c1"># exponential backoff, capped at 5 minutes per interval</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_squeue_backoff</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">get_polling_interval</span><span class="p">()</span> <span class="o">*</span> <span class="p">(</span><span class="mi">2</span> <span class="o">**</span> <span class="bp">self</span><span class="o">.</span><span class="n">_squeue_failure_count</span><span class="p">),</span> <span class="mi">300</span><span class="p">)</span>
+            <span class="n">elapsed</span> <span class="o">=</span> <span class="n">current_ts</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">_squeue_first_failure_at</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s1">&#39;squeue failed (attempt </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_squeue_failure_count</span><span class="si">}</span><span class="s1">, &#39;</span>
+                <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">elapsed</span><span class="si">:</span><span class="s1">.0f</span><span class="si">}</span><span class="s1">s elapsed, next retry in ~</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_squeue_backoff</span><span class="si">:</span><span class="s1">.0f</span><span class="si">}</span><span class="s1">s): </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s1">&#39;</span>
+            <span class="p">)</span>
+            <span class="k">if</span> <span class="n">elapsed</span> <span class="o">&gt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">squeue_timeout</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s1">&#39;squeue has been failing for </span><span class="si">{</span><span class="n">elapsed</span><span class="si">:</span><span class="s1">.0f</span><span class="si">}</span><span class="s1">s &#39;</span>
+                    <span class="sa">f</span><span class="s1">&#39;(&gt;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">squeue_timeout</span><span class="si">}</span><span class="s1">s timeout), aborting&#39;</span>
+                <span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">e</span>
             <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_last_states</span>
 
+        <span class="bp">self</span><span class="o">.</span><span class="n">_squeue_failure_count</span> <span class="o">=</span> <span class="mi">0</span>  <span class="c1"># reset on success</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_squeue_first_failure_at</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_squeue_backoff</span> <span class="o">=</span> <span class="mi">0</span>
         <span class="n">states</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">JobState</span><span class="p">]</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">()</span>
         <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">r</span><span class="o">.</span><span class="n">stdout</span><span class="o">.</span><span class="n">splitlines</span><span class="p">():</span>
             <span class="k">if</span> <span class="ow">not</span> <span class="n">line</span><span class="p">:</span>  <span class="c1"># skip empty line</span>

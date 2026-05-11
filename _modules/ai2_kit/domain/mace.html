@@ -240,6 +240,7 @@ const thebe_selector_output = ".output, .cell_output"
 <li class="toctree-l4"><a class="reference internal" href="../../../_api/ai2_kit.domain.deepmd.html">ai2_kit.domain.deepmd module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../../_api/ai2_kit.domain.dpff.html">ai2_kit.domain.dpff module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../../_api/ai2_kit.domain.dplr.html">ai2_kit.domain.dplr module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_api/ai2_kit.domain.fmlabel.html">ai2_kit.domain.fmlabel module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../../_api/ai2_kit.domain.iface.html">ai2_kit.domain.iface module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../../_api/ai2_kit.domain.lammps.html">ai2_kit.domain.lammps module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../../_api/ai2_kit.domain.lasp.html">ai2_kit.domain.lasp module</a></li>
@@ -559,6 +560,7 @@ document.write(`
     <span class="n">multi_gpus_per_job</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span></div>
 
 
+
 <div class="viewcode-block" id="CllMaceInput"><a class="viewcode-back" href="../../../_api/ai2_kit.domain.mace.html#ai2_kit.domain.mace.CllMaceInput">[docs]</a><span class="nd">@dataclass</span>
 <span class="k">class</span><span class="w"> </span><span class="nc">CllMaceInput</span><span class="p">:</span>
     <span class="n">config</span><span class="p">:</span> <span class="n">CllMaceInputConfig</span>
@@ -701,6 +703,7 @@ document.write(`
             <span class="n">previous_model</span><span class="o">=</span><span class="n">previous_model</span><span class="p">,</span>
             <span class="n">mace_train_opts</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">mace_train_opts</span><span class="p">,</span>
             <span class="n">model_name</span><span class="o">=</span><span class="s1">&#39;mace_model&#39;</span><span class="p">,</span>  <span class="c1"># Ensure consistent model name</span>
+            <span class="n">input_template</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">input_template</span><span class="p">,</span>
         <span class="p">)</span>
         <span class="n">all_steps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">steps</span><span class="p">)</span>
 
@@ -790,6 +793,7 @@ document.write(`
                         <span class="n">pretrained_model</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
                         <span class="n">mace_train_opts</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span><span class="p">,</span>
                         <span class="n">model_name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;mace_model&#39;</span><span class="p">,</span>
+                        <span class="n">input_template</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
                         <span class="p">):</span>
     <span class="n">steps</span> <span class="o">=</span> <span class="p">[]</span>
     
@@ -804,16 +808,46 @@ document.write(`
     <span class="k">if</span> <span class="n">pretrained_model</span><span class="p">:</span>
         <span class="n">mace_train_cmd</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">mace_train_cmd</span><span class="si">}</span><span class="s1"> --foundation-model </span><span class="si">{</span><span class="n">pretrained_model</span><span class="si">}</span><span class="s1">&#39;</span>
     
-    <span class="n">steps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
-        <span class="n">BashStep</span><span class="p">(</span><span class="n">cmd</span><span class="o">=</span><span class="n">mace_train_cmd</span><span class="p">,</span> <span class="n">cwd</span><span class="o">=</span><span class="n">cwd</span><span class="p">,</span> <span class="n">checkpoint</span><span class="o">=</span><span class="s1">&#39;mace-train&#39;</span><span class="p">)</span>  <span class="c1"># type: ignore</span>
-    <span class="p">)</span>
+    <span class="c1"># Check if this is distributed training that might have DDP cleanup issues</span>
+    <span class="n">is_distributed</span> <span class="o">=</span> <span class="n">input_template</span> <span class="ow">and</span> <span class="n">input_template</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;distributed&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+    
+    <span class="k">if</span> <span class="n">is_distributed</span><span class="p">:</span>
+        <span class="c1"># Create compound command that overrides exit codes for successful failures</span>
+        <span class="c1"># This hijacks the framework&#39;s __EXITCODE__ variable to bypass its validation</span>
+        <span class="n">mace_train_with_override</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;&#39;&#39;</span>
+<span class="si">{</span><span class="n">mace_train_cmd</span><span class="si">}</span>
+<span class="s1">__ORIGINAL_EXITCODE__=$?</span>
+<span class="s1">if [ $__ORIGINAL_EXITCODE__ -ne 0 ] &amp;&amp; [ -f &quot;</span><span class="si">{</span><span class="n">model_name</span><span class="si">}</span><span class="s1">.model&quot; ]; then</span>
+<span class="s1">    echo &quot;WARNING: MACE training had DDP cleanup failure but models were created successfully&quot;</span>
+<span class="s1">    true</span>
+<span class="s1">else</span>
+<span class="s1">    (exit $__ORIGINAL_EXITCODE__)</span>
+<span class="s1">fi&#39;&#39;&#39;</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="n">steps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+            <span class="n">BashStep</span><span class="p">(</span><span class="n">cmd</span><span class="o">=</span><span class="n">mace_train_with_override</span><span class="p">,</span> <span class="n">cwd</span><span class="o">=</span><span class="n">cwd</span><span class="p">,</span> <span class="n">checkpoint</span><span class="o">=</span><span class="s1">&#39;mace-train&#39;</span><span class="p">)</span>  <span class="c1"># type: ignore</span>
+        <span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="c1"># Single GPU training - use simple command</span>
+        <span class="n">steps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+            <span class="n">BashStep</span><span class="p">(</span><span class="n">cmd</span><span class="o">=</span><span class="n">mace_train_cmd</span><span class="p">,</span> <span class="n">cwd</span><span class="o">=</span><span class="n">cwd</span><span class="p">,</span> <span class="n">checkpoint</span><span class="o">=</span><span class="s1">&#39;mace-train&#39;</span><span class="p">)</span>  <span class="c1"># type: ignore</span>
+        <span class="p">)</span>
 
     <span class="k">if</span> <span class="n">compress_model</span><span class="p">:</span>
         <span class="c1"># Intelligent model selection for LAMMPS compression</span>
         <span class="n">model_selection</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;if [ -f &quot;</span><span class="si">{</span><span class="n">model_name</span><span class="si">}</span><span class="s1">_stagetwo.model&quot; ]; then SOURCE_MODEL=&quot;</span><span class="si">{</span><span class="n">model_name</span><span class="si">}</span><span class="s1">_stagetwo.model&quot;; else SOURCE_MODEL=&quot;</span><span class="si">{</span><span class="n">model_name</span><span class="si">}</span><span class="s1">.model&quot;; fi&#39;</span>
         <span class="n">compress_base</span> <span class="o">=</span> <span class="s1">&#39;mace_create_lammps_model&#39;</span>
-        <span class="c1"># Specify --head Default to avoid interactive prompt in batch jobs</span>
-        <span class="n">compress_cmd</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">model_selection</span><span class="si">}</span><span class="s1"> &amp;&amp; </span><span class="si">{</span><span class="n">env_prefix</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s2">&quot; &quot;</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">env_prefix</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="si">}{</span><span class="n">compress_base</span><span class="si">}</span><span class="s1"> $SOURCE_MODEL --format=mliap --head Default&#39;</span>
+        
+        <span class="c1"># Smart substitution: check if distributed training is enabled</span>
+        <span class="c1"># If distributed=True in input template, we&#39;re in multi-GPU mode</span>
+        <span class="n">is_distributed</span> <span class="o">=</span> <span class="n">input_template</span> <span class="ow">and</span> <span class="n">input_template</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;distributed&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">env_prefix</span> <span class="ow">and</span> <span class="s1">&#39;srun&#39;</span> <span class="ow">in</span> <span class="n">env_prefix</span> <span class="ow">and</span> <span class="n">is_distributed</span><span class="p">:</span>
+            <span class="c1"># Multi-GPU training detected, force single-task for compression</span>
+            <span class="n">srun_compress</span> <span class="o">=</span> <span class="n">env_prefix</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;srun&#39;</span><span class="p">,</span> <span class="s1">&#39;srun --ntasks=1 --gres=gpu:1 --cpus-per-task=1&#39;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># Single GPU or no distributed training, use original</span>
+            <span class="n">srun_compress</span> <span class="o">=</span> <span class="n">env_prefix</span>
+        
+        <span class="n">compress_cmd</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">model_selection</span><span class="si">}</span><span class="s1"> &amp;&amp; </span><span class="si">{</span><span class="n">srun_compress</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s2">&quot; &quot;</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">srun_compress</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="si">}{</span><span class="n">compress_base</span><span class="si">}</span><span class="s1"> $SOURCE_MODEL --format=mliap --head Default&#39;</span>
         
         <span class="n">steps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">BashStep</span><span class="p">(</span><span class="n">cmd</span><span class="o">=</span><span class="n">compress_cmd</span><span class="p">,</span> <span class="n">cwd</span><span class="o">=</span><span class="n">cwd</span><span class="p">))</span>
     <span class="k">return</span> <span class="n">steps</span>

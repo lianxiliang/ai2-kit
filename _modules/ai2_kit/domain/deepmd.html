@@ -240,6 +240,7 @@ const thebe_selector_output = ".output, .cell_output"
 <li class="toctree-l4"><a class="reference internal" href="../../../_api/ai2_kit.domain.deepmd.html">ai2_kit.domain.deepmd module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../../_api/ai2_kit.domain.dpff.html">ai2_kit.domain.dpff module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../../_api/ai2_kit.domain.dplr.html">ai2_kit.domain.dplr module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_api/ai2_kit.domain.fmlabel.html">ai2_kit.domain.fmlabel module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../../_api/ai2_kit.domain.iface.html">ai2_kit.domain.iface module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../../_api/ai2_kit.domain.lammps.html">ai2_kit.domain.lammps module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../../_api/ai2_kit.domain.lasp.html">ai2_kit.domain.lasp module</a></li>
@@ -455,7 +456,7 @@ document.write(`
 <span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
 
 <span class="kn">from</span><span class="w"> </span><span class="nn">.iface</span><span class="w"> </span><span class="kn">import</span> <span class="n">ICllTrainOutput</span><span class="p">,</span> <span class="n">BaseCllContext</span><span class="p">,</span> <span class="n">TRAINING_MODE</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">.data</span><span class="w"> </span><span class="kn">import</span> <span class="n">DataFormat</span><span class="p">,</span> <span class="n">get_data_format</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">.data</span><span class="w"> </span><span class="kn">import</span> <span class="n">DataFormat</span><span class="p">,</span> <span class="n">get_data_format</span><span class="p">,</span> <span class="n">mace_xyz_to_dpdata</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">.dpff</span><span class="w"> </span><span class="kn">import</span> <span class="n">set_dpff_ext_from_cp2k_output</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">.dplr</span><span class="w"> </span><span class="kn">import</span> <span class="n">dplr_v3_to_v2</span>
 
@@ -767,6 +768,19 @@ document.write(`
     <span class="k">return</span> <span class="n">_unique</span><span class="p">(</span><span class="n">train_systems</span><span class="p">),</span> <span class="n">_unique</span><span class="p">(</span><span class="n">outlier_systems</span><span class="p">),</span> <span class="n">_unique</span><span class="p">(</span><span class="n">validation_systems</span><span class="p">)</span>
 
 
+<span class="k">def</span><span class="w"> </span><span class="nf">_create_compression_cmd</span><span class="p">(</span><span class="n">dp_cmd</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Create a compression-safe command by replacing MPI settings with single-task settings.</span>
+<span class="sd">    This handles the common case where dp_cmd contains MPI settings that don&#39;t work with compression.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Handle srun with MPI settings - replace with single task</span>
+    <span class="k">if</span> <span class="s1">&#39;--mpi=pmi2&#39;</span> <span class="ow">in</span> <span class="n">dp_cmd</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">dp_cmd</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;--mpi=pmi2&#39;</span><span class="p">,</span> <span class="s1">&#39;--ntasks=1&#39;</span><span class="p">)</span>
+    
+    <span class="c1"># Could add more MPI patterns here in the future if needed</span>
+    <span class="k">return</span> <span class="n">dp_cmd</span>
+
+
 <span class="k">def</span><span class="w"> </span><span class="nf">_build_deepmd_steps</span><span class="p">(</span><span class="n">dp_cmd</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
                         <span class="n">compress_model</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
                         <span class="n">cwd</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
@@ -786,13 +800,17 @@ document.write(`
     <span class="n">steps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
         <span class="n">BashStep</span><span class="p">(</span><span class="n">cmd</span><span class="o">=</span><span class="n">dp_train_cmd_restart</span><span class="p">,</span> <span class="n">cwd</span><span class="o">=</span><span class="n">cwd</span><span class="p">,</span> <span class="n">checkpoint</span><span class="o">=</span><span class="s1">&#39;dp-train&#39;</span><span class="p">)</span>  <span class="c1"># type: ignore</span>
     <span class="p">)</span>
+    
+    <span class="c1"># Automatically create compression-safe command by fixing MPI settings</span>
+    <span class="n">compress_cmd</span> <span class="o">=</span> <span class="n">_create_compression_cmd</span><span class="p">(</span><span class="n">dp_cmd</span><span class="p">)</span>
+    
     <span class="k">if</span> <span class="n">compress_model</span><span class="p">:</span>
-        <span class="n">steps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">BashStep</span><span class="p">(</span><span class="n">cmd</span><span class="o">=</span><span class="p">[</span><span class="n">dp_cmd</span><span class="p">,</span> <span class="s1">&#39;freeze&#39;</span><span class="p">,</span> <span class="s1">&#39;-o&#39;</span><span class="p">,</span> <span class="n">DP_ORIGINAL_MODEL</span><span class="p">,</span> <span class="s1">&#39;&amp;&amp;&#39;</span><span class="p">,</span>
-                                   <span class="n">dp_cmd</span><span class="p">,</span> <span class="s1">&#39;compress&#39;</span><span class="p">,</span> <span class="s1">&#39;-i&#39;</span><span class="p">,</span> <span class="n">DP_ORIGINAL_MODEL</span><span class="p">,</span> <span class="s1">&#39;-o&#39;</span><span class="p">,</span> <span class="n">DP_FROZEN_MODEL</span><span class="p">],</span>
+        <span class="n">steps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">BashStep</span><span class="p">(</span><span class="n">cmd</span><span class="o">=</span><span class="p">[</span><span class="n">compress_cmd</span><span class="p">,</span> <span class="s1">&#39;freeze&#39;</span><span class="p">,</span> <span class="s1">&#39;-o&#39;</span><span class="p">,</span> <span class="n">DP_ORIGINAL_MODEL</span><span class="p">,</span> <span class="s1">&#39;&amp;&amp;&#39;</span><span class="p">,</span>
+                                   <span class="n">compress_cmd</span><span class="p">,</span> <span class="s1">&#39;compress&#39;</span><span class="p">,</span> <span class="s1">&#39;-i&#39;</span><span class="p">,</span> <span class="n">DP_ORIGINAL_MODEL</span><span class="p">,</span> <span class="s1">&#39;-o&#39;</span><span class="p">,</span> <span class="n">DP_FROZEN_MODEL</span><span class="p">],</span>
                               <span class="n">cwd</span><span class="o">=</span><span class="n">cwd</span><span class="p">))</span>
     <span class="k">else</span><span class="p">:</span>
         <span class="c1"># FIXME: a temporary workaround to support previous model</span>
-        <span class="n">steps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">BashStep</span><span class="p">(</span><span class="n">cmd</span><span class="o">=</span><span class="p">[</span><span class="n">dp_cmd</span><span class="p">,</span> <span class="s1">&#39;freeze&#39;</span><span class="p">,</span> <span class="s1">&#39;-o&#39;</span><span class="p">,</span> <span class="n">DP_ORIGINAL_MODEL</span><span class="p">,</span> <span class="s1">&#39;&amp;&amp;&#39;</span><span class="p">,</span>
+        <span class="n">steps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">BashStep</span><span class="p">(</span><span class="n">cmd</span><span class="o">=</span><span class="p">[</span><span class="n">compress_cmd</span><span class="p">,</span> <span class="s1">&#39;freeze&#39;</span><span class="p">,</span> <span class="s1">&#39;-o&#39;</span><span class="p">,</span> <span class="n">DP_ORIGINAL_MODEL</span><span class="p">,</span> <span class="s1">&#39;&amp;&amp;&#39;</span><span class="p">,</span>
                                    <span class="s1">&#39;cp&#39;</span><span class="p">,</span> <span class="n">DP_ORIGINAL_MODEL</span><span class="p">,</span> <span class="n">DP_FROZEN_MODEL</span><span class="p">],</span>
                               <span class="n">cwd</span><span class="o">=</span><span class="n">cwd</span><span class="p">))</span>
     <span class="k">return</span> <span class="n">steps</span>
@@ -954,6 +972,9 @@ document.write(`
                 <span class="n">dp_system</span> <span class="o">=</span> <span class="n">dpdata</span><span class="o">.</span><span class="n">LabeledSystem</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">raw_data</span><span class="p">[</span><span class="s1">&#39;url&#39;</span><span class="p">],</span> <span class="s1">&#39;output&#39;</span><span class="p">),</span> <span class="n">fmt</span><span class="o">=</span><span class="s1">&#39;cp2k/output&#39;</span><span class="p">,</span> <span class="n">type_map</span><span class="o">=</span><span class="n">type_map</span><span class="p">)</span>
             <span class="k">elif</span> <span class="n">data_format</span> <span class="o">==</span> <span class="n">DataFormat</span><span class="o">.</span><span class="n">VASP_OUTPUT_DIR</span><span class="p">:</span>
                 <span class="n">dp_system</span> <span class="o">=</span> <span class="n">dpdata</span><span class="o">.</span><span class="n">LabeledSystem</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">raw_data</span><span class="p">[</span><span class="s1">&#39;url&#39;</span><span class="p">],</span> <span class="s1">&#39;OUTCAR&#39;</span><span class="p">),</span> <span class="n">fmt</span><span class="o">=</span><span class="s1">&#39;vasp/outcar&#39;</span><span class="p">,</span> <span class="n">type_map</span><span class="o">=</span><span class="n">type_map</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="n">data_format</span> <span class="o">==</span> <span class="n">DataFormat</span><span class="o">.</span><span class="n">MACE_OUTPUT_DIR</span><span class="p">:</span>
+                <span class="n">xyz_file</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">raw_data</span><span class="p">[</span><span class="s1">&#39;url&#39;</span><span class="p">],</span> <span class="s1">&#39;output.xyz&#39;</span><span class="p">)</span>
+                <span class="n">dp_system</span> <span class="o">=</span> <span class="n">mace_xyz_to_dpdata</span><span class="p">(</span><span class="n">xyz_file</span><span class="p">,</span> <span class="n">type_map</span><span class="o">=</span><span class="n">type_map</span><span class="p">)</span>
             <span class="k">else</span><span class="p">:</span>
                 <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unsupported data format: </span><span class="si">{</span><span class="n">data_format</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
@@ -996,8 +1017,15 @@ document.write(`
         <span class="k">if</span> <span class="n">fparam</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
             <span class="n">set_fparam</span><span class="p">(</span><span class="n">dp_system</span><span class="p">,</span> <span class="n">fparam</span><span class="p">)</span>
 
-        <span class="k">if</span> <span class="n">isolate_outliers</span> <span class="ow">and</span> <span class="n">dp_system</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="s1">&#39;forces&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">max</span><span class="p">()</span> <span class="o">&gt;</span> <span class="n">outlier_f_cutoff</span><span class="p">:</span>
-            <span class="n">outlier_collection</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">raw_data</span><span class="p">,</span> <span class="n">dp_system</span><span class="p">))</span>
+        <span class="c1"># Check maximum atomic force magnitude (not just max component)</span>
+        <span class="k">if</span> <span class="n">isolate_outliers</span><span class="p">:</span>
+            <span class="n">forces</span> <span class="o">=</span> <span class="n">dp_system</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="s1">&#39;forces&#39;</span><span class="p">]</span>  <span class="c1"># shape: (n_frames, n_atoms, 3)</span>
+            <span class="c1"># Compute force magnitude per atom, then take max across atoms and frames</span>
+            <span class="n">max_atomic_force</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">forces</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">2</span><span class="p">))</span>
+            <span class="k">if</span> <span class="n">max_atomic_force</span> <span class="o">&gt;</span> <span class="n">outlier_f_cutoff</span><span class="p">:</span>
+                <span class="n">outlier_collection</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">raw_data</span><span class="p">,</span> <span class="n">dp_system</span><span class="p">))</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">dataset_collection</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">raw_data</span><span class="p">,</span> <span class="n">dp_system</span><span class="p">))</span>
         <span class="k">else</span><span class="p">:</span>
             <span class="n">dataset_collection</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">raw_data</span><span class="p">,</span> <span class="n">dp_system</span><span class="p">))</span>
 
