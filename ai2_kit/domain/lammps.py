@@ -1,8 +1,8 @@
-from ai2_kit.core.script import BashTemplate, BashStep, BashScript, make_gpu_parallel_steps
+from ai2_kit.core.script import BashTemplate, BashStep, BashScript, make_gpu_parallel_steps, BashSteps, make_multi_node_steps
 from ai2_kit.core.artifact import Artifact, ArtifactDict
 from ai2_kit.core.log import get_logger
 from ai2_kit.core.job import gather_jobs
-from ai2_kit.core.util import list_split, dict_nested_get, dump_json, dump_text
+from ai2_kit.core.util import list_split, dict_nested_get, dump_json, dump_text, list_chunk, flatten
 from ai2_kit.core.pydantic import BaseModel
 
 from typing import List, Literal, Optional, Mapping, Sequence, Any
@@ -193,6 +193,12 @@ class CllLammpsContextConfig(BaseModel):
     lammps_cmd: str = 'lmp'
     concurrency: int = 5
     multi_gpus_per_job: bool = False
+    tasks_per_node: int = 1
+    """
+    Number of LAMMPS tasks to run per node (1-4).
+    When > 1, tasks will be grouped and run in parallel on the same node
+    with automatic GPU assignment.
+    """
 
 @dataclass
 class CllLammpsInput:
@@ -282,13 +288,24 @@ async def cll_lammps(input: CllLammpsInput, ctx: CllLammpsContext):
 
     # submit jobs by the number of concurrency
     jobs = []
-    for i, steps_group in enumerate(list_split(steps, ctx.config.concurrency)):
+    
+    if ctx.config.tasks_per_node > 1:
+        step_groups = list_chunk(steps, ctx.config.tasks_per_node)
+    else:
+        step_groups = list_split(steps, ctx.config.concurrency)
+
+    for i, steps_group in enumerate(step_groups):
         if not steps_group:
             continue
         if ctx.config.multi_gpus_per_job:
             script = BashScript(
                 template=ctx.config.script_template,
                 steps=make_gpu_parallel_steps(steps_group),
+            )
+        elif ctx.config.tasks_per_node > 1:
+            script = BashScript(
+                template=ctx.config.script_template,
+                steps=make_multi_node_steps(steps_group, ctx.config.tasks_per_node),
             )
         else:
             script = BashScript(

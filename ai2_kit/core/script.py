@@ -120,3 +120,31 @@ def make_gpu_parallel_steps(step_groups: List[Union[BashSteps, BashStep, str]]):
         ]
     p_steps.append('wait')
     return p_steps
+
+
+def make_multi_node_steps(step_groups: List[Union[BashSteps, BashStep, str]], tasks_per_node: int = 4):
+    """
+    Generate steps to run multiple tasks on one node with GPU assignment.
+    Similar to make_gpu_parallel_steps but assigns GPU 0,1,2,3 directly.
+    """
+    if len(step_groups) > tasks_per_node:
+        raise ValueError(f'Cannot fit {len(step_groups)} tasks on {tasks_per_node} GPUs per node')
+    
+    p_steps = []
+    
+    for i, steps in enumerate(step_groups):
+        if isinstance(steps, str) or isinstance(steps, BashStep):
+            steps = [steps]
+        assert isinstance(steps, list), f'expect list of steps, got {type(steps)}'
+
+        p_steps += [
+            '{',
+            f'export CUDA_VISIBLE_DEVICES="{i}"',
+            f'echo "run task {i} on GPU {i}, CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"',
+            *steps,
+            '} &',
+        ]
+    
+    p_steps.append('wait')
+    return p_steps
+

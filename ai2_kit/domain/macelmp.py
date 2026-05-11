@@ -1,10 +1,10 @@
-from ai2_kit.core.artifact import Artifact, ArtifactDict
+from ai2_kit.core.artifact import Artifact
 from ai2_kit.core.log import get_logger
-from ai2_kit.core.script import BashStep, BashScript, make_gpu_parallel_steps
+from ai2_kit.core.script import BashStep, BashScript, make_gpu_parallel_steps, BashSteps, make_multi_node_steps
 from ai2_kit.core.job import gather_jobs
-from ai2_kit.core.util import list_split, flatten
+from ai2_kit.core.util import list_split, flatten, list_chunk
 
-from typing import List, Optional, Mapping
+from typing import List, Optional
 from dataclasses import dataclass
 import os
 
@@ -20,7 +20,10 @@ logger = get_logger(__name__)
 
 # MACE-LAMMPS uses the same configuration as regular LAMMPS
 CllMaceLammpsInputConfig = CllLammpsInputConfig
-CllMaceLammpsContextConfig = CllLammpsContextConfig
+
+class CllMaceLammpsContextConfig(CllLammpsContextConfig):
+    """MACE-LAMMPS context inherits from LAMMPS context"""
+    pass
 
 
 @dataclass
@@ -204,36 +207,50 @@ async def cll_mace_lammps(input: CllMaceLammpsInput, ctx: CllMaceLammpsContext):
     
     all_steps = []
     for task_dir in task_dirs:
-        task_steps = []
-        
         # Step 1: Run LAMMPS simulation with restart logic
         lammps_cmd = f'''if [ -f md.restart.* ]; then {base_lammps_cmd} -v restart 1; else {base_lammps_cmd} -v restart 0; fi'''
-        task_steps.append(BashStep(
+        
+        # Combine LAMMPS and MACE into a single command string with explicit sequential execution
+        # This reduces srun/BashStep overhead and prevents SLURM step interaction issues
+        combined_cmd = f'''
+{lammps_cmd} > lammps.log 2>&1
+__EXITCODE__=$?; if [ $__EXITCODE__ -ne 0 ]; then exit $__EXITCODE__; fi
+
+# Run MACE model deviation only if LAMMPS succeeds
+{mace_cmd} > mace-model-devi.log 2>&1
+'''
+        # Wrap the combined command in a single BashStep
+        task_step = BashStep(
             cwd=task_dir['url'],
-            cmd=lammps_cmd,
+            cmd=combined_cmd,
             checkpoint='mace-lammps',
             exit_on_error=not input.config.ignore_error
-        ))
+        )
         
-        # Step 2: Calculate MACE model deviation (same cwd, no checkpoint for second step)
-        task_steps.append(BashStep(
-            cwd=task_dir['url'],
-            cmd=mace_cmd,
-            exit_on_error=not input.config.ignore_error
-        ))
+        all_steps.append([task_step])
         
-        all_steps.append(task_steps)
-    
     # Submit jobs with the combined steps (same as cll_lammps)
     jobs = []
-    for i, steps_group in enumerate(list_split(all_steps, ctx.config.concurrency)):
+    
+    if ctx.config.tasks_per_node > 1:
+        step_groups = list_chunk(all_steps, ctx.config.tasks_per_node)
+    else:
+        step_groups = list_split(all_steps, ctx.config.concurrency)
+    
+    for i, steps_group in enumerate(step_groups):
         if not steps_group:
             continue
             
         if ctx.config.multi_gpus_per_job:
+            # Multi-GPU mode
             script = BashScript(
                 template=ctx.config.script_template,
                 steps=make_gpu_parallel_steps(steps_group),  # type: ignore
+            )
+        elif ctx.config.tasks_per_node > 1:
+            script = BashScript(
+                template=ctx.config.script_template,
+                steps=make_multi_node_steps(steps_group, ctx.config.tasks_per_node),  # type: ignore
             )
         else:
             script = BashScript(

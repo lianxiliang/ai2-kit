@@ -329,6 +329,19 @@ def _classify_dataset(dataset: List[Artifact]):
     return _unique(train_systems), _unique(outlier_systems), _unique(validation_systems)
 
 
+def _create_compression_cmd(dp_cmd: str) -> str:
+    """
+    Create a compression-safe command by replacing MPI settings with single-task settings.
+    This handles the common case where dp_cmd contains MPI settings that don't work with compression.
+    """
+    # Handle srun with MPI settings - replace with single task
+    if '--mpi=pmi2' in dp_cmd:
+        return dp_cmd.replace('--mpi=pmi2', '--ntasks=1')
+    
+    # Could add more MPI patterns here in the future if needed
+    return dp_cmd
+
+
 def _build_deepmd_steps(dp_cmd: str,
                         compress_model: bool,
                         cwd: str,
@@ -348,13 +361,17 @@ def _build_deepmd_steps(dp_cmd: str,
     steps.append(
         BashStep(cmd=dp_train_cmd_restart, cwd=cwd, checkpoint='dp-train')  # type: ignore
     )
+    
+    # Automatically create compression-safe command by fixing MPI settings
+    compress_cmd = _create_compression_cmd(dp_cmd)
+    
     if compress_model:
-        steps.append(BashStep(cmd=[dp_cmd, 'freeze', '-o', DP_ORIGINAL_MODEL, '&&',
-                                   dp_cmd, 'compress', '-i', DP_ORIGINAL_MODEL, '-o', DP_FROZEN_MODEL],
+        steps.append(BashStep(cmd=[compress_cmd, 'freeze', '-o', DP_ORIGINAL_MODEL, '&&',
+                                   compress_cmd, 'compress', '-i', DP_ORIGINAL_MODEL, '-o', DP_FROZEN_MODEL],
                               cwd=cwd))
     else:
         # FIXME: a temporary workaround to support previous model
-        steps.append(BashStep(cmd=[dp_cmd, 'freeze', '-o', DP_ORIGINAL_MODEL, '&&',
+        steps.append(BashStep(cmd=[compress_cmd, 'freeze', '-o', DP_ORIGINAL_MODEL, '&&',
                                    'cp', DP_ORIGINAL_MODEL, DP_FROZEN_MODEL],
                               cwd=cwd))
     return steps

@@ -139,6 +139,11 @@ def list_split(l: List[T], n: int) -> List[List[T]]:
     return [l[i*k+min(i, m): (i+1)*k+min(i+1, m)] for i in range(n)]
 
 
+def list_chunk(l: List[T], size: int) -> List[List[T]]:
+    """chunk list into chunks of size"""
+    return [l[i:i + size] for i in range(0, len(l), size)]
+
+
 def short_hash(s: str) -> str:
     """short hash string"""
     digest = hashlib.sha1(s.encode('utf-8')).digest()

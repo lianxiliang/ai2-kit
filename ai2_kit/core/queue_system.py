@@ -25,6 +25,7 @@ class QueueSystemConfig(BaseModel):
         squeue_bin: str = 'squeue'
         scancel_bin: str = 'scancel'
         polling_interval: int = 10
+        squeue_timeout: int = 1200  # abort if squeue keeps failing for this many seconds (default: 20 min)
 
     class LSF(BaseModel):
         bsub_bin: str = 'bsub'
@@ -163,6 +164,9 @@ class Slurm(BaseQueueSystem):
 
     _last_states = defaultdict(lambda: JobState.UNKNOWN)
     _last_update_at: float = 0
+    _squeue_failure_count: int = 0
+    _squeue_first_failure_at: float = 0
+    _squeue_backoff: float = 0
 
     translate_table = {
         'PD': JobState.PENDING,
@@ -218,7 +222,7 @@ class Slurm(BaseQueueSystem):
 
     def _get_all_states(self) -> Dict[str, JobState]:
         current_ts = time.time()
-        if  (current_ts - self._last_update_at) < self.get_polling_interval():
+        if (current_ts - self._last_update_at) < self.get_polling_interval() + self._squeue_backoff:
             return self._last_states
 
         # call squeue to get all states
@@ -226,9 +230,27 @@ class Slurm(BaseQueueSystem):
         try:
             r = self.connector.run(cmd, hide=True)
         except invoke.exceptions.UnexpectedExit as e:
-            logger.warning(f'Error when calling squeue: {e}')
+            if self._squeue_failure_count == 0:
+                self._squeue_first_failure_at = current_ts
+            self._squeue_failure_count += 1
+            self._last_update_at = current_ts  # prevent tight retry loop
+            # exponential backoff, capped at 5 minutes per interval
+            self._squeue_backoff = min(self.get_polling_interval() * (2 ** self._squeue_failure_count), 300)
+            elapsed = current_ts - self._squeue_first_failure_at
+            logger.warning(
+                f'squeue failed (attempt {self._squeue_failure_count}, '
+                f'{elapsed:.0f}s elapsed, next retry in ~{self._squeue_backoff:.0f}s): {e}'
+            )
+            if elapsed >= self.config.squeue_timeout:
+                raise RuntimeError(
+                    f'squeue has been failing for {elapsed:.0f}s '
+                    f'(>{self.config.squeue_timeout}s timeout), aborting'
+                ) from e
             return self._last_states
 
+        self._squeue_failure_count = 0  # reset on success
+        self._squeue_first_failure_at = 0
+        self._squeue_backoff = 0
         states: Dict[str, JobState] = dict()
         for line in r.stdout.splitlines():
             if not line:  # skip empty line
